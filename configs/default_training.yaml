@@ -1,0 +1,41 @@
+project_name: slm-starter
+model_name: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+output_dir: artifacts/experiments/base-run
+max_seq_length: 512
+seed: 42
+
+dataset:
+  path: data/sample_dataset.jsonl
+  field_names:
+    instruction: instruction
+    input: input
+    output: output
+  max_samples: 200
+
+training:
+  epochs: 3
+  batch_size: 64
+  micro_batch_size: 4
+  learning_rate: 0.0002
+  warmup_ratio: 0.03
+  fp16: true
+  gradient_checkpointing: true
+  logging_steps: 10
+  eval_steps: 50
+  save_steps: 100
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  bias: none
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: bfloat16
+  bnb_4bit_use_double_quant: true

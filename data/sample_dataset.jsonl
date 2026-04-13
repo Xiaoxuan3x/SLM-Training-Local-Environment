@@ -1,0 +1,2 @@
+{"instruction": "Summarize the benefits of parameter-efficient fine-tuning.", "input": "", "output": "Parameter-efficient fine-tuning keeps most base weights frozen..."}
+{"instruction": "Draft a friendly response to a customer asking when their order ships.", "input": "Order #4581 ships tomorrow", "output": "Hi there! Thanks for checking in..."}
