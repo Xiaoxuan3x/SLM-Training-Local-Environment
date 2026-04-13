@@ -1,4 +1,5 @@
-"""Simple entry point to fine-tune a small language model with LoRA."""
+"""Simple entry point to fine-tune a small language model"""
+"""This train script focuses on the most practical techniques: LoRA for efficient adaptation, domain-specific fine-tuning, and 4-bit quantization for deployment efficiency."""
 from __future__ import annotations
 
 import argparse
@@ -96,6 +97,8 @@ def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str
 
 
 def prepare_dataset(cfg: Config, tokenizer: AutoTokenizer):
+    # Domain-specific fine-tuning: load the JSONL data the user curated so the
+    # model learns the target terminology/workflows instead of generic corpora.
     dataset = load_dataset("json", data_files=cfg.dataset_path)["train"]
     if cfg.max_samples:
         dataset = dataset.select(range(min(cfg.max_samples, len(dataset))))
@@ -112,6 +115,8 @@ def load_model(cfg: Config):
     bnb_config = None
     torch_dtype = torch.bfloat16 if quantization.get("bnb_4bit_compute_dtype") == "bfloat16" else torch.float16
     if quantization.get("load_in_4bit"):
+        # Quantisation: load the base model with 4-bit weights via bitsandbytes to
+        # reduce VRAM usage for local experimentation.
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=quantization.get("bnb_4bit_use_double_quant", True),
@@ -124,6 +129,8 @@ def load_model(cfg: Config):
     )
     if bnb_config is not None:
         model = prepare_model_for_kbit_training(model)
+    # LoRA / efficient fine-tuning: inject small trainable adapters instead of
+    # updating all base weights so experiments remain lightweight.
     lora_cfg = LoraConfig(
         r=cfg.lora.get("r", 8),
         lora_alpha=cfg.lora.get("alpha", 16),
