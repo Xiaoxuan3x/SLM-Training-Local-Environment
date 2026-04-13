@@ -1,6 +1,10 @@
-"""Simple entry point to fine-tune a small language model"""
-"""This train script focuses on the most practical techniques: LoRA for efficient adaptation, domain-specific fine-tuning, and 4-bit quantization for deployment efficiency."""
 from __future__ import annotations
+
+"""Simple entry point to fine-tune a small language model"""
+"""This train script focuses on the most practical techniques:
+LoRA for efficient adaptation,
+domain-specific fine-tuning, and
+4-bit quantization for deployment efficiency."""
 
 import argparse
 import os
@@ -167,12 +171,14 @@ def train(cfg: Config):
         learning_rate=cfg.training["learning_rate"],
         warmup_ratio=cfg.training.get("warmup_ratio", 0.03),
         logging_steps=cfg.training.get("logging_steps", 10),
-        evaluation_strategy="steps",
+        logging_strategy="steps",
+        eval_strategy="steps",
         eval_steps=cfg.training.get("eval_steps", 50),
+        save_strategy="steps",
         save_steps=cfg.training.get("save_steps", 100),
         fp16=cfg.training.get("fp16", True),
         gradient_checkpointing=cfg.training.get("gradient_checkpointing", False),
-        report_to=[]
+        report_to=[],
     )
 
     trainer = Trainer(
@@ -180,7 +186,7 @@ def train(cfg: Config):
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
     )
     trainer.train()
