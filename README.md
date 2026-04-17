@@ -4,6 +4,7 @@ A beginner-friendly starter kit for experimenting with small language model (SLM
 
 ## Repository layout
 - `src/train_slm.py` – Hugging Face/PEFT training entry point with LoRA + optional 4-bit loading.
+- `src/compare_eval_loss.py` – Eval-loss comparison for the original base model versus a saved LoRA adapter.
 - `configs/default_training.yaml` – Central configuration for model, data, LoRA, and quantisation settings.
 - `data/sample_dataset.jsonl` – Two toy instruction/response pairs that demonstrate the expected JSONL schema.
 - `requirements.txt` – Python dependencies tested on Python 3.10+.
@@ -64,6 +65,7 @@ Create additional YAML files under `configs/` for different experiments and pass
 
 ## Usage patterns
 - **Train on your own data**: Copy your JSONL file into `data/`, update `dataset.path`, and re-run `make train`.
+- **Compare eval loss**: Run `make compare-eval-loss` after training to compare the base model against the saved LoRA adapter.
 - **Change the base model**: Swap `model_name` for another instruction-tuned checkpoint that fits your VRAM budget. Adjust `lora.target_modules` accordingly.
 - **Disable quantisation**: Set `quantization.load_in_4bit` to `false` if bitsandbytes or GPU drivers are unavailable.
 - **Automate installs**: `make install` provisions the `.venv` and installs requirements end-to-end.
@@ -71,5 +73,6 @@ Create additional YAML files under `configs/` for different experiments and pass
 ## Documentation
 - **Environment tutorial**: `docs/environment_setup_tutorial.md` – extended instructions, troubleshooting notes, and cleanup steps.
 - **Technique reference**: `docs/small_language_model_techniques.md` – overview of the LoRA → domain tuning → distillation → quantisation pipeline selected for this project.
+- **Model comparison**: `docs/model_comparison.md` – first steps for comparing fine-tuned LoRA results against the original base model.
 
 Feel free to open issues or extend the repo with evaluation notebooks, dataset builders, or deployment scripts as you deepen your SLM experiments.
