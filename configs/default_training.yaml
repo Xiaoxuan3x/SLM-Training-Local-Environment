@@ -5,7 +5,7 @@ max_seq_length: 512
 seed: 42
 
 dataset:
-  path: data/sample_dataset.jsonl
+  path: data/uk_mortgage_dataset.jsonl
   field_names:
     instruction: instruction
     input: input
