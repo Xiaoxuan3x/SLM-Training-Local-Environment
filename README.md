@@ -73,6 +73,6 @@ Create additional YAML files under `configs/` for different experiments and pass
 ## Documentation
 - **Environment tutorial**: `docs/environment_setup_tutorial.md` – extended instructions, troubleshooting notes, and cleanup steps.
 - **Technique reference**: `docs/small_language_model_techniques.md` – overview of the LoRA → domain tuning → distillation → quantisation pipeline selected for this project.
-- **Model comparison**: `docs/model_comparison.md` – first steps for comparing fine-tuned LoRA results against the original base model.
+- **Model comparison**: `docs/model_comparison_techniques.md` – first steps for comparing fine-tuned LoRA results against the original base model.
 
 Feel free to open issues or extend the repo with evaluation notebooks, dataset builders, or deployment scripts as you deepen your SLM experiments.
