@@ -187,6 +187,12 @@ ollama serve
 
 The conversion and quantization tools come from `llama.cpp`.
 
+On macOS, install the build prerequisites with Homebrew:
+
+```bash
+brew install cmake python@3.11
+```
+
 From this repo root:
 
 ```bash
@@ -194,12 +200,47 @@ mkdir -p external artifacts/exports/gguf
 git clone https://github.com/ggml-org/llama.cpp external/llama.cpp
 
 cd external/llama.cpp
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+python --version
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt
 
 cmake -B build
+cmake --build build --config Release -j
+```
+
+If `external/llama.cpp` already exists, skip the `git clone` command and start
+from:
+
+```bash
+cd external/llama.cpp
+```
+
+The `python --version` check should print Python 3.11.x or 3.12.x. Avoid
+Python 3.13 for this environment: `llama.cpp` currently pulls
+`numpy~=1.26.4`, and that NumPy release does not provide Python 3.13 wheels.
+On Python 3.13, `pip` may fall back to building NumPy from source and fail
+during installation.
+
+If you already created `external/llama.cpp/.venv` with Python 3.13, recreate it
+before installing requirements:
+
+```bash
+deactivate 2>/dev/null || true
+mv .venv ".venv-py313-broken-$(date +%Y%m%d-%H%M%S)"
+python3.11 -m venv .venv
+source .venv/bin/activate
+python --version
+```
+
+On macOS, if the build fails with missing standard C++ headers such as
+`'array' file not found`, `'mutex' file not found`, or `'cstdio' file not
+found`, re-run CMake with the SDK C++ include path:
+
+```bash
+cmake -B build \
+  -DCMAKE_CXX_FLAGS="-isystem $(xcrun --show-sdk-path)/usr/include/c++/v1"
 cmake --build build --config Release -j
 ```
 
@@ -207,6 +248,12 @@ The build should create:
 
 ```text
 external/llama.cpp/build/bin/llama-quantize
+```
+
+Verify it before continuing:
+
+```bash
+test -x build/bin/llama-quantize
 ```
 
 ### 3. Convert the Hugging Face Export to GGUF
@@ -283,6 +330,15 @@ From the repo root:
 ollama create uk-mortgage-slm -f artifacts/exports/ollama/Modelfile
 ```
 
+If Ollama returns `invalid model name` while gathering model components, check
+that the GGUF file referenced by the Modelfile exists:
+
+```bash
+test -f artifacts/exports/gguf/base-run-Q4_K_M.gguf
+```
+
+Create it with the quantization step above before running `ollama create`.
+
 Check that Ollama knows about it:
 
 ```bash
@@ -336,6 +392,23 @@ Notes: Free valuation and standard legal work included.
 
 ### Response:"
 ```
+```bash
+ollama run uk-mortgage-slm "### Instruction:
+List the key pros and cons of this mortgage product.
+
+### Input:
+Provider: Halifax
+Mortgage name: 5 Year Fixed Remortgage
+Interest rate: 4.65%
+Maximum LTV: 75%
+Term type: Fixed
+Length: 5 years
+Booking fee: £999
+APRC: 5.80%
+Notes: Free valuation and standard legal work included.
+```
+
+### Response:"
 
 Expected result: Ollama should generate a concise mortgage summary.
 
