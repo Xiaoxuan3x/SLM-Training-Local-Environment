@@ -406,9 +406,10 @@ Length: 5 years
 Booking fee: £999
 APRC: 5.80%
 Notes: Free valuation and standard legal work included.
-```
 
 ### Response:"
+
+```
 
 Expected result: Ollama should generate a concise mortgage summary.
 
