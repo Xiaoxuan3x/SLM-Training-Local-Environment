@@ -159,7 +159,7 @@ Result: fine-tuning made the model worse on the eval set
 
 The comparison script evaluates both models on the same split from the configured dataset. With the current small dataset, the eval split may contain only a few examples, so treat the result as an early signal rather than final proof of quality.
 
-If the base model is gated or private, authenticate with Hugging Face before running the command.
+If the base model is gated or private, authenticate with per Face before running the command.
 
 If 4-bit loading causes hardware or driver errors, set this in the config and run the command again:
 
@@ -167,29 +167,6 @@ If 4-bit loading causes hardware or driver errors, set this in the config and ru
 quantization:
   load_in_4bit: false
 ```
-
-## After Evaluation: Export the Model
-
-Once the adapter improves eval loss or passes manual review, export a standalone
-Hugging Face model folder:
-
-```bash
-make export-merged
-```
-
-This merges the LoRA adapter from `artifacts/experiments/base-run/` into the base
-model and writes:
-
-```text
-artifacts/exports/base-run-merged/
-```
-
-Use the merged Hugging Face folder as the primary exported model for Python
-inference, evaluation, and future conversion. If you need LM Studio,
-`llama.cpp`, or a single quantized local runtime file, convert the merged model
-to GGUF as a separate deployment artifact.
-
-See `docs/model_export_workflow.md` for the full export decision guide.
 
 ## To Be Updated
 
