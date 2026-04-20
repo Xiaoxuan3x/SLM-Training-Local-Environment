@@ -38,8 +38,47 @@ make export-merged
 ## Route 1: Run the Hugging Face Export Locally
 
 Use this route when you want to run the model with Python and `transformers`.
+There are two common scenarios:
 
-### 1. Create a Portable Model Archive
+- **Scenario A: Run from this repo** when you are still working in the training
+  project and want a quick smoke test.
+- **Scenario B: Run from a fresh environment** when you want to prove the
+  exported model folder works outside the repo.
+
+### Scenario A: Run From This Repo
+
+Use this when you are still inside this repo and the project `.venv` already
+has the required dependencies.
+
+Run the built-in smoke test:
+
+```bash
+make run-model
+```
+
+The runner loads this path by default:
+
+```text
+artifacts/exports/base-run-merged/
+```
+
+For a custom prompt:
+
+```bash
+python src/run_model.py --prompt-file prompt.txt
+```
+
+The runner uses local files only unless you pass `--allow-downloads`.
+
+Expected result: the model should produce a response to whatever prompt is
+configured in `src/run_model.py`, or to the custom prompt file you pass.
+
+### Scenario B: Run From a Fresh Environment
+
+Use this when you want to move the merged Hugging Face export to another folder
+or target machine and run it without relying on this repo.
+
+#### 1. Create a Portable Model Archive
 
 From this repo:
 
@@ -55,7 +94,7 @@ Move this archive to the target machine:
 artifacts/exports/base-run-merged.tar.gz
 ```
 
-### 2. Create a Fresh Local Environment
+#### 2. Create a Fresh Local Environment
 
 On the target machine:
 
@@ -77,7 +116,7 @@ After unpacking, the model folder should be:
 slm-local-run/base-run-merged/
 ```
 
-### 3. Run a Smoke Test
+#### 3. Run a Smoke Test
 
 Run this from the fresh environment:
 
@@ -113,9 +152,10 @@ model = AutoModelForCausalLM.from_pretrained(
 model.eval()
 
 inputs = tokenizer(prompt, return_tensors="pt")
+input_length = inputs["input_ids"].shape[-1]
 outputs = model.generate(
     **inputs,
-    max_new_tokens=160,
+    max_length=input_length + 160,
     do_sample=False,
     repetition_penalty=1.08,
     pad_token_id=tokenizer.eos_token_id,
@@ -126,30 +166,7 @@ print(text[len(prompt):].strip() if text.startswith(prompt) else text)
 PY
 ```
 
-Expected result: the model should produce a short mortgage summary using the
-fields in the prompt.
-
-### 4. Run From This Repo
-
-If you are still inside this repo, use the built-in runner instead:
-
-```bash
-make run-model
-```
-
-For a custom prompt:
-
-```bash
-python src/run_model.py --prompt-file prompt.txt
-```
-
-The runner loads this path by default:
-
-```text
-artifacts/exports/base-run-merged/
-```
-
-It uses local files only unless you pass `--allow-downloads`.
+Expected result: the model should produce a response to the smoke-test prompt.
 
 ## Route 2: Convert to GGUF and Run With Ollama
 
@@ -411,7 +428,7 @@ Notes: Free valuation and standard legal work included.
 
 ```
 
-Expected result: Ollama should generate a concise mortgage summary.
+Expected result: Ollama should generate a response to the prompt you send.
 
 ## Which Route Should You Use?
 
