@@ -159,7 +159,7 @@ Result: fine-tuning made the model worse on the eval set
 
 The comparison script evaluates both models on the same split from the configured dataset. With the current small dataset, the eval split may contain only a few examples, so treat the result as an early signal rather than final proof of quality.
 
-If the base model is gated or private, authenticate with Hugging Face before running the command.
+If the base model is gated or private, authenticate with per Face before running the command.
 
 If 4-bit loading causes hardware or driver errors, set this in the config and run the command again:
 

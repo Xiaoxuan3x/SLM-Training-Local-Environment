@@ -5,12 +5,15 @@ A beginner-friendly starter kit for experimenting with small language model (SLM
 ## Repository layout
 - `src/train_slm.py` – Hugging Face/PEFT training entry point with LoRA + optional 4-bit loading.
 - `src/compare_eval_loss.py` – Eval-loss comparison for the original base model versus a saved LoRA adapter.
+- `src/export_merged_model.py` – Merges a trained LoRA adapter into the base model and saves a standalone Hugging Face model folder.
+- `src/run_model.py` – Loads the merged local model and runs a text-generation smoke test.
 - `configs/default_training.yaml` – Central configuration for model, data, LoRA, and quantisation settings.
 - `data/sample_dataset.jsonl` – Two toy instruction/response pairs that demonstrate the expected JSONL schema.
 - `requirements.txt` – Python dependencies tested on Python 3.10+.
-- `Makefile` – Convenience targets for installing dependencies and launching training.
+- `Makefile` – Convenience targets for installing dependencies and launching training, evaluation, export, and local smoke tests.
 - `docs/environment_setup_tutorial.md` – Step-by-step walkthrough for bringing the environment online.
 - `docs/small_language_model_techniques.md` – Reference guide (provided by you) describing the SLM methodology being followed.
+- `docs/model_export_workflow.md` – Explains how to run the merged Hugging Face export locally and optionally convert it to GGUF for Ollama.
 
 ## Quick start
 1. **Create a virtual environment**
@@ -31,7 +34,27 @@ A beginner-friendly starter kit for experimenting with small language model (SLM
    ```
 Artifacts (adapter weights + tokenizer) are written to `artifacts/experiments/base-run/`. For a slower but CPU-friendly pass, set `quantization.load_in_4bit: false` in the config before running.
 
+4. **Compare the adapter with the base model**
+   ```bash
+   make compare-eval-loss
+   ```
+5. **Export a standalone Hugging Face model**
+   ```bash
+   make export-merged
+   ```
+The merged model folder is written to `artifacts/exports/base-run-merged/`. Move or deploy the whole folder, not only `model.safetensors`.
+
+6. **Run the exported model locally**
+   ```bash
+   make run-model
+   # or
+   python src/run_model.py --prompt-file prompt.txt
+   ```
+This loads `artifacts/exports/base-run-merged/` and runs a generation smoke test.
+
 Need more detailed screenshots or OS-specific notes? See `docs/environment_setup_tutorial.md` for the full guide.
+
+For a clean local deployment guide, including a brand-new environment and optional GGUF/Ollama route, see `docs/model_export_workflow.md`.
 
 ## Configuring the environment
 All knobs live inside `configs/default_training.yaml`. The major sections are:
@@ -66,13 +89,19 @@ Create additional YAML files under `configs/` for different experiments and pass
 ## Usage patterns
 - **Train on your own data**: Copy your JSONL file into `data/`, update `dataset.path`, and re-run `make train`.
 - **Compare eval loss**: Run `make compare-eval-loss` after training to compare the base model against the saved LoRA adapter.
+- **Export a runnable model**: Run `make export-merged` to merge the LoRA adapter into the base model and save a standalone Hugging Face model folder.
+- **Test the exported model**: Run `make run-model`, or call `python src/run_model.py --prompt-file prompt.txt` for a custom prompt.
+- **Deploy outside this repo**: Archive and move the full `artifacts/exports/base-run-merged/` folder. See `docs/model_export_workflow.md`.
+- **Create a GGUF/Ollama model**: Convert the merged Hugging Face export to GGUF only when you need Ollama, LM Studio, or `llama.cpp`. See `docs/model_export_workflow.md`.
 - **Change the base model**: Swap `model_name` for another instruction-tuned checkpoint that fits your VRAM budget. Adjust `lora.target_modules` accordingly.
 - **Disable quantisation**: Set `quantization.load_in_4bit` to `false` if bitsandbytes or GPU drivers are unavailable.
+- **Avoid Hugging Face network checks when cached**: Run `python src/train_slm.py --config configs/default_training.yaml --local-files-only`.
 - **Automate installs**: `make install` provisions the `.venv` and installs requirements end-to-end.
 
 ## Documentation
 - **Environment tutorial**: `docs/environment_setup_tutorial.md` – extended instructions, troubleshooting notes, and cleanup steps.
 - **Technique reference**: `docs/small_language_model_techniques.md` – overview of the LoRA → domain tuning → distillation → quantisation pipeline selected for this project.
 - **Model comparison**: `docs/model_comparison_techniques.md` – first steps for comparing fine-tuned LoRA results against the original base model.
+- **Model export workflow**: `docs/model_export_workflow.md` – how to run the Hugging Face export in a fresh local environment and optionally convert it to GGUF for Ollama.
 
 Feel free to open issues or extend the repo with evaluation notebooks, dataset builders, or deployment scripts as you deepen your SLM experiments.

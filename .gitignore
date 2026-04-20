@@ -6,4 +6,4 @@ artifacts/
 checkpoints/
 outputs/
 data/cache/
-
+external/
