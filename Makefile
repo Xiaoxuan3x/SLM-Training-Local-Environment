@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV ?= .venv
 ACTIVATE = . $(VENV)/bin/activate
 
-.PHONY: install train compare-eval-loss clean
+.PHONY: install train compare-eval-loss export-merged run-model clean
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -14,6 +14,12 @@ train:
 
 compare-eval-loss:
 	$(ACTIVATE) && python src/compare_eval_loss.py --config configs/default_training.yaml
+
+export-merged:
+	$(ACTIVATE) && python src/export_merged_model.py --config configs/default_training.yaml
+
+run-model:
+	$(ACTIVATE) && python src/run_model.py
 
 clean:
 	rm -rf $(VENV) artifacts

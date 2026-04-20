@@ -168,6 +168,29 @@ quantization:
   load_in_4bit: false
 ```
 
+## After Evaluation: Export the Model
+
+Once the adapter improves eval loss or passes manual review, export a standalone
+Hugging Face model folder:
+
+```bash
+make export-merged
+```
+
+This merges the LoRA adapter from `artifacts/experiments/base-run/` into the base
+model and writes:
+
+```text
+artifacts/exports/base-run-merged/
+```
+
+Use the merged Hugging Face folder as the primary exported model for Python
+inference, evaluation, and future conversion. If you need LM Studio,
+`llama.cpp`, or a single quantized local runtime file, convert the merged model
+to GGUF as a separate deployment artifact.
+
+See `docs/model_export_workflow.md` for the full export decision guide.
+
 ## To Be Updated
 
 Future sections should cover:
