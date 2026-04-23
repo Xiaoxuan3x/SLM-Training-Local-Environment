@@ -76,17 +76,6 @@ def load_config(path: str) -> Config:
     return Config(raw=data)
 
 
-def build_prompt(example: Dict[str, Any], fields: Dict[str, str]) -> str:
-    instruction = example.get(fields["instruction"], "").strip()
-    input_text = example.get(fields.get("input", ""), "").strip()
-    output = example.get(fields["output"], "").strip()
-    prompt = "### Instruction:\n" + instruction + "\n\n"
-    if input_text:
-        prompt += "### Input:\n" + input_text + "\n\n"
-    prompt += "### Response:\n" + output
-    return prompt
-
-
 def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str, str], max_length: int) -> Dict[str, Any]:
     instruction = example.get(fields["instruction"], "").strip()
     input_text = example.get(fields.get("input", ""), "").strip()
