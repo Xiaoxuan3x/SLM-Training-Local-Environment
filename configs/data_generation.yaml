@@ -1,0 +1,47 @@
+pipeline:
+  output_path: data/synthetic_mortgage_dataset.jsonl
+  seed: 42
+
+# Provider selection
+# ─────────────────────────────────────────────────────────────
+# Groq (free tier) — export GROQ_API_KEY before running
+#   Sign up at https://console.groq.com
+#   Free tier: ~30 requests/minute, no cost
+#
+# Anthropic (paid) — export ANTHROPIC_API_KEY before running
+#   Sign up at https://console.anthropic.com
+#   Full run costs ~$8–10 USD
+# ─────────────────────────────────────────────────────────────
+provider:
+  name: groq          # switch to: anthropic
+
+product_sampler:
+  num_products: 250
+  base_rate: 3.75
+  report_date: "2026-04-23"
+
+qa_generator:
+  # Groq models:      llama-3.1-70b-versatile  |  llama-3.1-8b-instant (faster, lower quality)
+  # Anthropic models: claude-sonnet-4-6
+  model: llama-3.1-70b-versatile
+  questions_per_product: 7
+  max_tokens: 1024
+  temperature: 0.8
+  question_types:
+    - summarisation
+    - eligibility
+    - rate_analysis
+    - fee_tradeoff
+    - risk_suitability
+    - comparison
+    - factual_correctness
+    - terminology
+    - borrower_advice
+
+quality_filter:
+  # Groq models:      llama-3.1-70b-versatile  |  llama-3.1-8b-instant
+  # Anthropic models: claude-haiku-4-5-20251001
+  model: llama-3.1-70b-versatile
+  min_score: 4
+  max_tokens: 256
+  temperature: 0.0
