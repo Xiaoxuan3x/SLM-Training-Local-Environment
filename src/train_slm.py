@@ -18,7 +18,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    DataCollatorForLanguageModeling,
+    DataCollatorForSeq2Seq,
     Trainer,
     TrainingArguments,
 )
@@ -88,16 +88,23 @@ def build_prompt(example: Dict[str, Any], fields: Dict[str, str]) -> str:
 
 
 def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str, str], max_length: int) -> Dict[str, Any]:
-    prompt = build_prompt(example, fields)
-    tokenized = tokenizer(
-        prompt,
-        truncation=True,
-        max_length=max_length,
-        padding="max_length",
-        return_tensors=None,
-    )
-    tokenized["labels"] = tokenized["input_ids"].copy()
-    return tokenized
+    instruction = example.get(fields["instruction"], "").strip()
+    input_text = example.get(fields.get("input", ""), "").strip()
+    output = example.get(fields["output"], "").strip()
+
+    prefix = "### Instruction:\n" + instruction + "\n\n"
+    if input_text:
+        prefix += "### Input:\n" + input_text + "\n\n"
+    prefix += "### Response:\n"
+
+    prefix_ids = tokenizer(prefix, truncation=False, return_tensors=None)["input_ids"]
+    full_ids = tokenizer(prefix + output, truncation=True, max_length=max_length, return_tensors=None)["input_ids"]
+
+    # Mask all prefix tokens so loss is only computed on the response.
+    labels = [-100] * len(prefix_ids) + full_ids[len(prefix_ids):]
+    labels = labels[: len(full_ids)]
+
+    return {"input_ids": full_ids, "attention_mask": [1] * len(full_ids), "labels": labels}
 
 
 def prepare_dataset(cfg: Config, tokenizer: AutoTokenizer):
@@ -161,7 +168,9 @@ def train(cfg: Config):
     train_dataset, eval_dataset = prepare_dataset(cfg, tokenizer)
     model = load_model(cfg)
 
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    # Dynamic padding: pad each batch to its longest sequence instead of always
+    # padding to max_seq_length, which wastes compute on short samples.
+    data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, padding=True, label_pad_token_id=-100)
 
     training_args = TrainingArguments(
         output_dir=cfg.output_dir,
