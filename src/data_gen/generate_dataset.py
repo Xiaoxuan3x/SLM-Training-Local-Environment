@@ -9,7 +9,7 @@ Phase 3: Filter pairs with an LLM-as-judge using domain-specific criteria.
 Output: JSONL in the same {instruction, input, output} format as the existing dataset.
 
 Supported providers (set in configs/data_generation.yaml):
-  groq      — free tier, Llama 3.1 70B.  Export GROQ_API_KEY before running.
+  groq      — free tier, Llama 3.3 70B.  Export GROQ_API_KEY before running.
   anthropic — paid, Claude Sonnet/Haiku.  Export ANTHROPIC_API_KEY before running.
 
 Usage (run from repo root):

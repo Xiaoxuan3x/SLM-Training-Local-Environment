@@ -27,7 +27,7 @@ The pipeline has three sequential phases. Each phase has a clear input, a clear 
 │  · Rate spreads calibrated to base rate by LTV tier         │
 │  · Pool of 30 realistic product notes                       │
 │                                                             │
-│  Output: 250 unique MortgageProduct records                 │
+│  Output: 125 unique MortgageProduct records                 │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -44,7 +44,7 @@ The pipeline has three sequential phases. Each phase has a clear input, a clear 
 │  · borrower_advice                                          │
 │                                                             │
 │  The product record is enforced as the exact "input" field. │
-│  Output: ~1,750 raw instruction-response pairs              │
+│  Output: ~875 raw instruction-response pairs                │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -58,7 +58,7 @@ The pipeline has three sequential phases. Each phase has a clear input, a clear 
 │  · no_hallucination    — no invented rates, fees, or terms  │
 │                                                             │
 │  Pairs scoring < 4 on any criterion are discarded.          │
-│  Output: ~1,200–1,500 high-quality training examples        │
+│  Output: ~600–750 high-quality training examples            │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -85,7 +85,7 @@ Interest rates are calculated as `base_rate + spread`, where the spread range is
 
 All sampling uses a seeded `random.Random` instance, which means the product set is fully reproducible across runs.
 
-> **Implementation note:** The sampler deduplicates on `(provider, product_name, ltv)` to avoid training on trivially repeated inputs. With a pool of 18 providers, 6 term types, 15 product suffixes, and 7 LTV tiers, this leaves enough headroom to draw 250 unique records comfortably.
+> **Implementation note:** The sampler deduplicates on `(provider, product_name, ltv)` to avoid training on trivially repeated inputs. With a pool of 18 providers, 6 term types, 15 product suffixes, and 7 LTV tiers, this leaves enough headroom to draw 125 unique records comfortably.
 
 ## Phase 2: Question-answer generation
 
@@ -136,10 +136,10 @@ The pipeline supports two providers, switched by a single line in `configs/data_
 
 | Provider | Cost | Model | Rate limit |
 |---|---|---|---|
-| **Groq** (default) | Free | Llama 3.1 70B | ~30 requests/min |
+| **Groq** (default) | Free | Llama 3.3 70B | ~30 requests/min |
 | Anthropic | ~$8–10 per full run | Claude Sonnet + Haiku | Higher limits |
 
-The full run with Groq takes longer due to rate limiting (Phase 2 ~8 min, Phase 3 ~1 hour), but costs nothing. Anthropic completes the same run in minutes.
+The full run with Groq takes longer due to rate limiting (Phase 2 ~10 min, Phase 3 ~30 min), but costs nothing. Anthropic completes the same run in minutes.
 
 ### Prerequisites
 
@@ -188,7 +188,7 @@ Run a dry-run to confirm the product sampler works and preview the product recor
 python src/data_gen/generate_dataset.py --dry-run
 ```
 
-This samples all 250 products locally and prints the first two records. No API calls are made regardless of which provider is configured.
+This samples all 125 products locally and prints the first two records. No API calls are made regardless of which provider is configured.
 
 ### Step 2: Inspect and adjust the config
 
@@ -199,22 +199,22 @@ provider:
   name: groq          # switch to: anthropic
 
 product_sampler:
-  num_products: 250               # increase for more data volume
+  num_products: 125               # increase for more data volume
   base_rate: 3.75                 # update if the Bank of England rate changes
   report_date: "2026-04-23"
 
 qa_generator:
-  model: llama-3.1-70b-versatile  # groq model; anthropic: claude-sonnet-4-6
+  model: llama-3.3-70b-versatile  # groq model; anthropic: claude-sonnet-4-6
   questions_per_product: 7        # max is 9 (number of available question types)
   temperature: 0.8                # higher = more varied phrasing
 
 quality_filter:
-  model: llama-3.1-70b-versatile  # groq model; anthropic: claude-haiku-4-5-20251001
+  model: llama-3.3-70b-versatile  # groq model; anthropic: claude-haiku-4-5-20251001
   min_score: 4                    # raise to 5 for stricter filtering
 ```
 
 Key decisions:
-- **`num_products`**: 250 products × 7 questions = ~1,750 raw pairs, yielding ~1,200–1,500 after filtering. Reduce to 50–100 for a quick first run.
+- **`num_products`**: 125 products × 7 questions = ~875 raw pairs, yielding ~600–750 after filtering. Reduce to 50–100 for a quick first run.
 - **`base_rate`**: Keep this aligned with the actual Bank of England base rate so that rate analysis questions generate accurate answers.
 - **`min_score`**: A threshold of 4 is recommended. Lowering to 3 increases volume at the cost of quality.
 
@@ -232,19 +232,19 @@ The script prints a progress bar for each phase and reports how many pairs passe
 
 ```text
 Phase 1: Sampling mortgage product records...
-  Sampled 250 products.
+  Sampled 125 products.
 
-Provider: groq  |  Gen model: llama-3.1-70b-versatile  |  Filter model: llama-3.1-70b-versatile
+Provider: groq  |  Gen model: llama-3.3-70b-versatile  |  Filter model: llama-3.3-70b-versatile
 
 Phase 2: Generating Q&A pairs...
-[##################################################] 100.0%  product 250/250
-  Generated 1,742 raw pairs.
+[##################################################] 100.0%  product 125/125
+  Generated 871 raw pairs.
 
 Phase 3: Filtering with LLM-as-judge...
-[##################################################] 100.0%  pair 1742/1742
-  Kept 1,381 / 1,742 pairs (rejected 361).
+[##################################################] 100.0%  pair 871/871
+  Kept 690 / 871 pairs (rejected 181).
 
-Saved 1,381 examples to data/synthetic_mortgage_dataset.jsonl
+Saved 690 examples to data/synthetic_mortgage_dataset.jsonl
 ```
 
 ### Step 4: Skip filtering for fast iteration
@@ -297,9 +297,9 @@ Every example has the same three fields required by `src/train_slm.py`:
 
 | Provider | Phase 2 time | Phase 3 time | Total cost |
 |---|---|---|---|
-| Groq (free tier) | ~8 min | ~60 min | $0 |
+| Groq (free tier) | ~10 min | ~30 min | $0 |
 | Anthropic | ~2 min | ~5 min | ~$8–10 USD |
 
 Groq's free tier enforces approximately 30 requests per minute. The pipeline automatically sleeps 2 seconds between requests to stay within this limit. If you exceed it, the client retries with exponential back-off before raising an error.
 
-To reduce Groq run time, lower `num_products` in the config. 100 products yields ~550 filtered examples and completes Phase 3 in roughly 25 minutes.
+To reduce Groq run time, lower `num_products` in the config. 50 products yields ~275 filtered examples and completes Phase 3 in roughly 15 minutes.
