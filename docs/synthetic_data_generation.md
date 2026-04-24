@@ -12,14 +12,6 @@ Second, and more importantly, the examples are all the same type. Every instruct
 
 The synthetic data pipeline in this repository solves both problems. It generates a large number of diverse, domain-grounded examples that cover a wide range of question types, all anchored to realistic UK mortgage product data.
 
-## Why not use a generic topic-expansion pipeline
-
-A common pattern for synthetic dataset generation starts with a high-level topic, expands it into subtopics, then generates question-answer pairs from those subtopics. This works well for open-domain knowledge tasks such as general science or history, where topic breadth is the main challenge.
-
-UK mortgage fine-tuning is a different kind of problem. The model does not need to know more subtopics about mortgages in the abstract. It needs to reason correctly about specific structured inputs — a product record containing a provider, a rate, an LTV, a fee, and a set of conditions — and answer different kinds of questions about that record. The bottleneck is question-type diversity, not topic breadth.
-
-A second concern is financial realism. A large generator model asked to invent mortgage product data will produce records with implausible rate and LTV combinations. A general-purpose reward model cannot catch these errors because it scores for helpfulness and coherence, not for consistency with UK market conventions. The pipeline here separates the generation of structured product data (done deterministically with a template sampler) from the generation of question-answer pairs (done with a language model), which keeps the financial inputs grounded throughout.
-
 ## Pipeline overview
 
 The pipeline has three sequential phases. Each phase has a clear input, a clear output, and a specific rationale for why it is designed the way it is.
