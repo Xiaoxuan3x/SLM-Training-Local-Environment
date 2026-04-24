@@ -23,8 +23,8 @@ product_sampler:
 qa_generator:
   # Groq models:      llama-3.3-70b-versatile  |  llama-3.1-8b-instant (faster, lower quality)
   # Anthropic models: claude-sonnet-4-6
-  model: llama-3.3-70b-versatile
-  questions_per_product: 7
+  model: llama-3.1-8b-instant
+  questions_per_product: 4
   max_tokens: 1024
   temperature: 0.8
   question_types:
@@ -41,7 +41,7 @@ qa_generator:
 quality_filter:
   # Groq models:      llama-3.3-70b-versatile  |  llama-3.1-8b-instant
   # Anthropic models: claude-haiku-4-5-20251001
-  model: llama-3.3-70b-versatile
+  model: llama-3.1-8b-instant
   min_score: 4
   max_tokens: 256
   temperature: 0.0

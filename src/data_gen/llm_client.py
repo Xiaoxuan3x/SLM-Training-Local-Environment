@@ -57,11 +57,12 @@ class GroqClient(LLMClient):
 
     def __init__(self, api_key: str, model: str) -> None:
         from groq import Groq, RateLimitError
-        self._client = Groq(api_key=api_key)
+        self._client = Groq(api_key=api_key, timeout=60.0)
         self._model = model
         self._RateLimitError = RateLimitError
 
     def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
+        import httpx
         for attempt in range(4):
             try:
                 resp = self._client.chat.completions.create(
@@ -76,6 +77,8 @@ class GroqClient(LLMClient):
                 return resp.choices[0].message.content
             except self._RateLimitError:
                 time.sleep(60 * (attempt + 1))
+            except httpx.TimeoutException:
+                time.sleep(10 * (attempt + 1))
         raise RuntimeError("Groq: max rate-limit retries exceeded.")
 
 
