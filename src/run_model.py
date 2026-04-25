@@ -11,7 +11,18 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 DEFAULT_PROMPT = """### Instruction:
-Who I am?
+Summarise the mortgage product and highlight the main lending terms.
+
+### Input:
+Provider: Halifax
+Mortgage name: 5 Year Fixed Remortgage
+Interest rate: 4.65%
+Maximum LTV: 75%
+Term type: Fixed
+Length: 5 years
+Booking fee: £999
+APRC: 5.80%
+Notes: Free valuation and standard legal work included.
 
 ### Response:
 """
