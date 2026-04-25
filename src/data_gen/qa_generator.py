@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import random
-import time
 
 from llm_client import LLMClient
 from product_sampler import MortgageProduct
@@ -92,7 +92,7 @@ def _parse_response(text: str) -> list[dict[str, str]]:
     return json.loads(text.strip())
 
 
-def generate_qa_pairs(
+async def generate_qa_pairs(
     product: MortgageProduct,
     client: LLMClient,
     questions_per_product: int,
@@ -113,7 +113,7 @@ def generate_qa_pairs(
 
     for attempt in range(max_retries):
         try:
-            text = client.complete(
+            text = await client.complete(
                 system=_SYSTEM_PROMPT,
                 user=prompt,
                 max_tokens=max_tokens,
@@ -124,11 +124,11 @@ def generate_qa_pairs(
             for pair in pairs:
                 if not all(k in pair for k in ("instruction", "input", "output")):
                     continue
-                pair["input"] = product_text  # enforce exact product text
+                pair["input"] = product_text
                 valid.append(pair)
             return valid
         except (json.JSONDecodeError, IndexError, KeyError):
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
+                await asyncio.sleep(2 ** attempt)
 
     return []

@@ -26,11 +26,11 @@ Usage (run from repo root):
 """
 
 import argparse
+import asyncio
 import json
 import os
 import random
 import sys
-import time
 from pathlib import Path
 
 import yaml
@@ -48,12 +48,6 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def _progress(current: int, total: int, label: str = "") -> None:
-    pct = current / total * 100
-    bar = "#" * int(pct / 2) + "-" * (50 - int(pct / 2))
-    print(f"\r[{bar}] {pct:5.1f}%  {label}", end="", flush=True)
-
-
 def _resolve_api_key(provider: str) -> str:
     env_var = api_key_env(provider)
     key = os.environ.get(env_var)
@@ -62,7 +56,22 @@ def _resolve_api_key(provider: str) -> str:
     return key
 
 
-def run(config: dict, skip_filter: bool, dry_run: bool) -> None:
+class _Counter:
+    """Thread-safe-enough counter for asyncio (single-threaded event loop)."""
+    def __init__(self, total: int, label: str) -> None:
+        self.n = 0
+        self.total = total
+        self.label = label
+
+    def tick(self, detail: str = "") -> None:
+        self.n += 1
+        pct = self.n / self.total * 100
+        bar = "#" * int(pct / 2) + "-" * (50 - int(pct / 2))
+        suffix = f"  {detail}" if detail else ""
+        print(f"\r[{bar}] {pct:5.1f}%  {self.label} {self.n}/{self.total}{suffix}", end="", flush=True)
+
+
+async def run(config: dict, skip_filter: bool, dry_run: bool) -> None:
     pipeline_cfg = config["pipeline"]
     sampler_cfg  = config["product_sampler"]
     gen_cfg      = config["qa_generator"]
@@ -97,58 +106,73 @@ def run(config: dict, skip_filter: bool, dry_run: bool) -> None:
 
     print(f"Provider: {provider}  |  "
           f"Gen model: {gen_cfg['model']}  |  "
-          f"Filter model: {filter_cfg['model']}\n")
+          f"Filter model: {filter_cfg['model']}  |  "
+          f"Concurrency: {gen_client.max_concurrency}\n")
 
     # ------------------------------------------------------------------ #
-    # Phase 2 — Q&A generation                                            #
+    # Phase 2 — Q&A generation (concurrent)                               #
     # ------------------------------------------------------------------ #
     print("Phase 2: Generating Q&A pairs...")
     rng = random.Random(pipeline_cfg["seed"])
-    all_pairs: list[dict[str, str]] = []
+    # Pre-sample question types per product so rng stays deterministic
+    type_selections = [
+        rng.sample(gen_cfg["question_types"],
+                   min(gen_cfg["questions_per_product"], len(gen_cfg["question_types"])))
+        for _ in products
+    ]
 
-    for i, product in enumerate(products):
-        _progress(i + 1, len(products), f"product {i+1}/{len(products)}")
-        pairs = generate_qa_pairs(
-            product=product,
-            client=gen_client,
-            questions_per_product=gen_cfg["questions_per_product"],
-            question_types=gen_cfg["question_types"],
-            max_tokens=gen_cfg["max_tokens"],
-            temperature=gen_cfg["temperature"],
-            rng=rng,
-        )
-        all_pairs.extend(pairs)
-        time.sleep(gen_client.inter_request_sleep)
+    sem = asyncio.Semaphore(gen_client.max_concurrency)
+    counter = _Counter(len(products), "product")
 
+    async def gen_one(product, selected_types):
+        async with sem:
+            pairs = await generate_qa_pairs(
+                product=product,
+                client=gen_client,
+                questions_per_product=gen_cfg["questions_per_product"],
+                question_types=selected_types,
+                max_tokens=gen_cfg["max_tokens"],
+                temperature=gen_cfg["temperature"],
+                rng=random.Random(),  # each task gets its own rng; types already fixed above
+            )
+            counter.tick()
+            return pairs
+
+    results = await asyncio.gather(*[gen_one(p, t) for p, t in zip(products, type_selections)])
+    all_pairs: list[dict[str, str]] = [pair for pairs in results for pair in pairs]
     print(f"\n  Generated {len(all_pairs)} raw pairs.\n")
 
     # ------------------------------------------------------------------ #
-    # Phase 3 — quality filtering                                         #
+    # Phase 3 — quality filtering (concurrent)                            #
     # ------------------------------------------------------------------ #
     if skip_filter:
         final_pairs = all_pairs
         print(f"Filter skipped. Keeping all {len(final_pairs)} pairs.\n")
     else:
         print("Phase 3: Filtering with LLM-as-judge...")
+        filter_sem = asyncio.Semaphore(filter_client.max_concurrency)
+        filter_counter = _Counter(len(all_pairs), "pair")
+
+        async def filter_one(pair):
+            async with filter_sem:
+                scores = await score_example(
+                    example=pair,
+                    client=filter_client,
+                    max_tokens=filter_cfg["max_tokens"],
+                    temperature=filter_cfg["temperature"],
+                )
+                filter_counter.tick()
+                return pair, scores
+
+        filter_results = await asyncio.gather(*[filter_one(p) for p in all_pairs])
+
         final_pairs = []
         rejected = 0
-
-        for i, pair in enumerate(all_pairs):
-            _progress(i + 1, len(all_pairs), f"pair {i+1}/{len(all_pairs)}")
-            scores = score_example(
-                example=pair,
-                client=filter_client,
-                max_tokens=filter_cfg["max_tokens"],
-                temperature=filter_cfg["temperature"],
-            )
-            if scores is None:
+        for pair, scores in filter_results:
+            if scores is None or not passes_filter(scores, min_score=filter_cfg["min_score"]):
                 rejected += 1
-                continue
-            if passes_filter(scores, min_score=filter_cfg["min_score"]):
-                final_pairs.append(pair)
             else:
-                rejected += 1
-            time.sleep(filter_client.inter_request_sleep)
+                final_pairs.append(pair)
 
         print(f"\n  Kept {len(final_pairs)} / {len(all_pairs)} pairs "
               f"(rejected {rejected}).\n")
@@ -191,7 +215,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     config = load_config(args.config)
-    run(config, skip_filter=args.skip_filter, dry_run=args.dry_run)
+    asyncio.run(run(config, skip_filter=args.skip_filter, dry_run=args.dry_run))
 
 
 if __name__ == "__main__":

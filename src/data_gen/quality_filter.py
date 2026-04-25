@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import time
 
 from llm_client import LLMClient
 
@@ -28,7 +28,7 @@ Return JSON only:
 {{"factual_accuracy": <1-5>, "financial_reasoning": <1-5>, "completeness": <1-5>, "no_hallucination": <1-5>}}"""
 
 
-def score_example(
+async def score_example(
     example: dict[str, str],
     client: LLMClient,
     max_tokens: int,
@@ -43,7 +43,7 @@ def score_example(
 
     for attempt in range(max_retries):
         try:
-            text = client.complete(
+            text = await client.complete(
                 system=_JUDGE_SYSTEM,
                 user=prompt,
                 max_tokens=max_tokens,
@@ -57,7 +57,7 @@ def score_example(
             return json.loads(text.strip())
         except (json.JSONDecodeError, IndexError):
             if attempt < max_retries - 1:
-                time.sleep(1)
+                await asyncio.sleep(1)
 
     return None
 

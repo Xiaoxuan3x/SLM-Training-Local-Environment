@@ -13,7 +13,7 @@ pipeline:
 #   Full run costs ~$8–10 USD
 # ─────────────────────────────────────────────────────────────
 provider:
-  name: groq          # switch to: anthropic
+  name: anthropic     # switch to: groq
 
 product_sampler:
   num_products: 125
@@ -23,9 +23,9 @@ product_sampler:
 qa_generator:
   # Groq models:      llama-3.3-70b-versatile  |  llama-3.1-8b-instant (faster, lower quality)
   # Anthropic models: claude-sonnet-4-6
-  model: llama-3.1-8b-instant
+  model: claude-sonnet-4-6
   questions_per_product: 4
-  max_tokens: 1024
+  max_tokens: 512
   temperature: 0.8
   question_types:
     - summarisation
@@ -41,7 +41,7 @@ qa_generator:
 quality_filter:
   # Groq models:      llama-3.3-70b-versatile  |  llama-3.1-8b-instant
   # Anthropic models: claude-haiku-4-5-20251001
-  model: llama-3.1-8b-instant
+  model: claude-haiku-4-5-20251001
   min_score: 4
   max_tokens: 256
   temperature: 0.0

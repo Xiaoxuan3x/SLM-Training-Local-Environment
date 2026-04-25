@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+import asyncio
 from abc import ABC, abstractmethod
 
 _API_KEY_ENV = {
@@ -10,36 +10,32 @@ _API_KEY_ENV = {
 
 
 class LLMClient(ABC):
-    """Provider-agnostic wrapper around a language model API.
-
-    Each implementation handles its own rate-limit retries internally so
-    callers never need to import provider-specific exceptions.
-    """
+    """Provider-agnostic async wrapper around a language model API."""
 
     @abstractmethod
-    def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
+    async def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
         ...
 
     @property
     @abstractmethod
-    def inter_request_sleep(self) -> float:
-        """Minimum seconds to sleep between consecutive requests."""
+    def max_concurrency(self) -> int:
+        """Max simultaneous in-flight requests for this provider."""
         ...
 
 
 class AnthropicClient(LLMClient):
-    inter_request_sleep = 0.3
+    max_concurrency = 10
 
     def __init__(self, api_key: str, model: str) -> None:
         import anthropic
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
         self._RateLimitError = anthropic.RateLimitError
 
-    def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
+    async def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
         for attempt in range(4):
             try:
-                resp = self._client.messages.create(
+                resp = await self._client.messages.create(
                     model=self._model,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -48,24 +44,25 @@ class AnthropicClient(LLMClient):
                 )
                 return resp.content[0].text
             except self._RateLimitError:
-                time.sleep(30 * (attempt + 1))
+                await asyncio.sleep(30 * (attempt + 1))
         raise RuntimeError("Anthropic: max rate-limit retries exceeded.")
 
 
 class GroqClient(LLMClient):
-    inter_request_sleep = 2.0  # free tier: ~30 RPM
+    # Free tier is ~30 RPM; keep concurrency low and let retry logic handle 429s
+    max_concurrency = 2
 
     def __init__(self, api_key: str, model: str) -> None:
-        from groq import Groq, RateLimitError
-        self._client = Groq(api_key=api_key, timeout=60.0)
+        from groq import AsyncGroq, RateLimitError
+        self._client = AsyncGroq(api_key=api_key, timeout=60.0)
         self._model = model
         self._RateLimitError = RateLimitError
 
-    def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
+    async def complete(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
         import httpx
         for attempt in range(4):
             try:
-                resp = self._client.chat.completions.create(
+                resp = await self._client.chat.completions.create(
                     model=self._model,
                     max_tokens=max_tokens,
                     temperature=temperature,
@@ -76,9 +73,9 @@ class GroqClient(LLMClient):
                 )
                 return resp.choices[0].message.content
             except self._RateLimitError:
-                time.sleep(60 * (attempt + 1))
+                await asyncio.sleep(60 * (attempt + 1))
             except httpx.TimeoutException:
-                time.sleep(10 * (attempt + 1))
+                await asyncio.sleep(10 * (attempt + 1))
         raise RuntimeError("Groq: max rate-limit retries exceeded.")
 
 
@@ -91,7 +88,6 @@ def build_client(provider: str, api_key: str, model: str) -> LLMClient:
 
 
 def api_key_env(provider: str) -> str:
-    """Return the environment variable name that holds this provider's API key."""
     try:
         return _API_KEY_ENV[provider]
     except KeyError:
