@@ -18,7 +18,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    DataCollatorForLanguageModeling,
+    DataCollatorForSeq2Seq,
 )
 
 from train_slm import Config, load_config, prepare_dataset
@@ -84,7 +84,12 @@ def evaluate_model(
     eval_dataset: Any,
     batch_size: int,
 ) -> float:
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    data_collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer,
+        model=model,
+        padding=True,
+        label_pad_token_id=-100,
+    )
     dataloader = DataLoader(
         eval_dataset,
         batch_size=batch_size,
