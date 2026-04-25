@@ -297,8 +297,8 @@ Every example has the same three fields required by `src/train_slm.py`:
 
 | Provider | Phase 2 time | Phase 3 time | Total cost |
 |---|---|---|---|
-| Anthropic (default) | ~3 min | ~5 min | ~$4–6 USD |
-| Groq (free tier) | ~10 min | ~20 min | $0 |
+| Anthropic (default) | ~20 min | ~50 min | ~$8–10 USD |
+| Groq (free tier) | ~60 min | ~90 min | $0 |
 
 Groq's free tier enforces approximately 30 requests per minute. The pipeline automatically sleeps 2 seconds between requests to stay within this limit. If you exceed it, the client retries with exponential back-off before raising an error.
 
