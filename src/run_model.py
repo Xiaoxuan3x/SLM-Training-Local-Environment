@@ -3,6 +3,7 @@ from __future__ import annotations
 """Run text generation from a local merged Hugging Face model."""
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
@@ -37,7 +38,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--prompt", type=str, default=None, help="Prompt text to send to the model.")
     parser.add_argument("--prompt-file", type=str, default=None, help="Path to a text file containing the prompt.")
-    parser.add_argument("--max-new-tokens", type=int, default=160, help="Maximum number of generated tokens.")
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=400,
+        help="Maximum number of generated tokens before generation is truncated.",
+    )
     parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature. Use 0 for greedy decoding.")
     parser.add_argument("--repetition-penalty", type=float, default=1.08, help="Penalty for repeated text.")
     parser.add_argument(
@@ -77,15 +83,18 @@ def main() -> None:
         local_files_only=local_files_only,
         low_cpu_mem_usage=True,
     )
+    if getattr(model, "generation_config", None) is not None:
+        model.generation_config.max_length = None
     model.to(device)
     model.eval()
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    input_length = inputs["input_ids"].shape[-1]
     generate_kwargs = {
-        "max_length": input_length + args.max_new_tokens,
+        "max_new_tokens": args.max_new_tokens,
         "repetition_penalty": args.repetition_penalty,
         "pad_token_id": tokenizer.eos_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        "return_dict_in_generate": True,
     }
     if args.temperature > 0:
         generate_kwargs["do_sample"] = True
@@ -96,9 +105,21 @@ def main() -> None:
     with torch.inference_mode():
         outputs = model.generate(**inputs, **generate_kwargs)
 
-    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    generated_ids = outputs.sequences[0]
+    new_token_count = generated_ids.shape[-1] - inputs["input_ids"].shape[-1]
+    stopped_by_max_tokens = (
+        new_token_count >= args.max_new_tokens and generated_ids[-1].item() != tokenizer.eos_token_id
+    )
+
+    text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     completion = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
     print(completion)
+    if stopped_by_max_tokens:
+        print(
+            f"\n[warning] Generation reached the max token limit ({args.max_new_tokens}) before EOS. "
+            "Increase --max-new-tokens for longer answers.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":
