@@ -73,7 +73,9 @@ The merged model folder is written to `artifacts/exports/base-run-merged/`. Move
    # or
    python src/run_model.py --prompt-file prompt.txt
    ```
-This loads `artifacts/exports/base-run-merged/` and runs a generation smoke test.
+This loads `artifacts/exports/base-run-merged/` and runs a generation smoke test using the default prompt embedded in `src/run_model.py`.
+
+To test a different prompt without editing code, update the `DEFAULT_PROMPT` constant in `src/run_model.py` and rerun the same command.
 
 Need more detailed screenshots or OS-specific notes? See `docs/environment_setup_tutorial.md` for the full guide.
 
