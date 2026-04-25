@@ -37,7 +37,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from llm_client import build_client, api_key_env
+from llm_client import build_client, api_key_env, RateLimited
 from product_sampler import sample_products
 from qa_generator import generate_qa_pairs
 from quality_filter import score_example, passes_filter
@@ -125,18 +125,27 @@ async def run(config: dict, skip_filter: bool, dry_run: bool) -> None:
     counter = _Counter(len(products), "product")
 
     async def gen_one(product, selected_types):
-        async with sem:
-            pairs = await generate_qa_pairs(
-                product=product,
-                client=gen_client,
-                questions_per_product=gen_cfg["questions_per_product"],
-                question_types=selected_types,
-                max_tokens=gen_cfg["max_tokens"],
-                temperature=gen_cfg["temperature"],
-                rng=random.Random(),  # each task gets its own rng; types already fixed above
-            )
-            counter.tick()
-            return pairs
+        for rl_attempt in range(4):
+            try:
+                async with sem:
+                    pairs = await generate_qa_pairs(
+                        product=product,
+                        client=gen_client,
+                        questions_per_product=gen_cfg["questions_per_product"],
+                        question_types=selected_types,
+                        max_tokens=gen_cfg["max_tokens"],
+                        temperature=gen_cfg["temperature"],
+                    )
+                    counter.tick()
+                    return pairs
+            except RateLimited:
+                # Sleep OUTSIDE the semaphore so slots stay free during backoff.
+                await asyncio.sleep(30 * (rl_attempt + 1))
+            except Exception:
+                counter.tick()
+                return []
+        counter.tick()
+        return []
 
     results = await asyncio.gather(*[gen_one(p, t) for p, t in zip(products, type_selections)])
     all_pairs: list[dict[str, str]] = [pair for pairs in results for pair in pairs]
@@ -154,15 +163,24 @@ async def run(config: dict, skip_filter: bool, dry_run: bool) -> None:
         filter_counter = _Counter(len(all_pairs), "pair")
 
         async def filter_one(pair):
-            async with filter_sem:
-                scores = await score_example(
-                    example=pair,
-                    client=filter_client,
-                    max_tokens=filter_cfg["max_tokens"],
-                    temperature=filter_cfg["temperature"],
-                )
-                filter_counter.tick()
-                return pair, scores
+            for rl_attempt in range(4):
+                try:
+                    async with filter_sem:
+                        scores = await score_example(
+                            example=pair,
+                            client=filter_client,
+                            max_tokens=filter_cfg["max_tokens"],
+                            temperature=filter_cfg["temperature"],
+                        )
+                        filter_counter.tick()
+                        return pair, scores
+                except RateLimited:
+                    await asyncio.sleep(30 * (rl_attempt + 1))
+                except Exception:
+                    filter_counter.tick()
+                    return pair, None
+            filter_counter.tick()
+            return pair, None
 
         filter_results = await asyncio.gather(*[filter_one(p) for p in all_pairs])
 

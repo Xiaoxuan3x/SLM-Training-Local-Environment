@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 
 from llm_client import LLMClient
 from product_sampler import MortgageProduct
@@ -99,10 +98,9 @@ async def generate_qa_pairs(
     question_types: list[str],
     max_tokens: int,
     temperature: float,
-    rng: random.Random,
     max_retries: int = 3,
 ) -> list[dict[str, str]]:
-    selected_types = rng.sample(question_types, min(questions_per_product, len(question_types)))
+    selected_types = question_types
     product_text = product.to_input_text()
 
     prompt = _USER_PROMPT_TEMPLATE.format(
@@ -127,7 +125,7 @@ async def generate_qa_pairs(
                 pair["input"] = product_text
                 valid.append(pair)
             return valid
-        except (json.JSONDecodeError, IndexError, KeyError):
+        except (json.JSONDecodeError, IndexError, KeyError, ValueError):
             if attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
 
