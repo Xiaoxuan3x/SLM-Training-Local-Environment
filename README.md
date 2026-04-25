@@ -3,17 +3,40 @@
 A beginner-friendly starter kit for experimenting with small language model (SLM) training on your laptop or workstation. It packages a LoRA-based fine-tuning script, a configurable YAML file, sample data, and documentation so you can iterate quickly without building the plumbing from scratch.
 
 ## Repository layout
-- `src/train_slm.py` – Hugging Face/PEFT training entry point with LoRA + optional 4-bit loading.
-- `src/compare_eval_loss.py` – Eval-loss comparison for the original base model versus a saved LoRA adapter.
-- `src/export_merged_model.py` – Merges a trained LoRA adapter into the base model and saves a standalone Hugging Face model folder.
-- `src/run_model.py` – Loads the merged local model and runs a text-generation smoke test.
-- `configs/default_training.yaml` – Central configuration for model, data, LoRA, and quantisation settings.
-- `data/sample_dataset.jsonl` – Two toy instruction/response pairs that demonstrate the expected JSONL schema.
-- `requirements.txt` – Python dependencies tested on Python 3.10+.
-- `Makefile` – Convenience targets for installing dependencies and launching training, evaluation, export, and local smoke tests.
-- `docs/environment_setup_tutorial.md` – Step-by-step walkthrough for bringing the environment online.
-- `docs/small_language_model_techniques.md` – Reference guide (provided by you) describing the SLM methodology being followed.
-- `docs/model_export_workflow.md` – Explains how to run the merged Hugging Face export locally and optionally convert it to GGUF for Ollama.
+- **Core training and inference**
+  - `src/train_slm.py` – Hugging Face/PEFT training entry point with LoRA and optional 4-bit loading.
+  - `src/compare_eval_loss.py` – Compares evaluation loss for the base model versus a saved LoRA adapter.
+  - `src/export_merged_model.py` – Merges a trained LoRA adapter into the base model and saves a standalone Hugging Face model folder.
+  - `src/run_model.py` – Loads the merged local model and runs a text-generation smoke test.
+
+- **Synthetic data generation**
+  - `src/data_gen/generate_dataset.py` – Main synthetic dataset generation pipeline.
+  - `src/data_gen/qa_generator.py` – Builds instruction/response style QA examples.
+  - `src/data_gen/llm_client.py` – Wraps the LLM provider calls used during generation.
+  - `src/data_gen/product_sampler.py` – Samples source product or domain inputs for generation.
+  - `src/data_gen/quality_filter.py` – Applies quality filtering to generated examples.
+  - `src/data_gen/__init__.py` – Package marker for the data generation module.
+
+- **Configuration**
+  - `configs/default_training.yaml` – Central configuration for model, dataset, LoRA, and quantisation settings.
+  - `configs/data_generation.yaml` – Configuration for synthetic data generation and filtering.
+
+- **Sample and generated data**
+  - `data/sample_dataset.jsonl` – Minimal toy instruction dataset showing the expected JSONL schema.
+  - `data/uk_mortgage_dataset.jsonl` – Domain dataset used for mortgage-focused fine-tuning experiments.
+  - `data/synthetic_mortgage_dataset.jsonl` – Synthetic mortgage QA dataset produced by the generation pipeline.
+
+- **Documentation**
+  - `docs/environment_setup_tutorial.md` – Step-by-step walkthrough for bringing the environment online.
+  - `docs/small_language_model_techniques.md` – Reference guide describing the SLM methodology used in this project.
+  - `docs/model_comparison_techniques.md` – Notes on comparing the fine-tuned adapter against the base model.
+  - `docs/model_export_workflow.md` – How to export a merged Hugging Face model and optionally convert it to GGUF for Ollama.
+  - `docs/synthetic_data_generation.md` – Workflow and configuration guide for synthetic dataset creation.
+
+- **Project tooling**
+  - `Makefile` – Convenience targets for install, training, evaluation, export, generation, and local smoke tests.
+  - `requirements.txt` – Python dependencies tested on Python 3.10+.
+  - `README.md` – Project overview, quick start, and usage notes.
 
 ## Quick start
 1. **Create a virtual environment**
