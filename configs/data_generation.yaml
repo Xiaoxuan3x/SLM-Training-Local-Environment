@@ -10,7 +10,7 @@ pipeline:
 #
 # Anthropic (paid) — export ANTHROPIC_API_KEY before running
 #   Sign up at https://console.anthropic.com
-#   Full run costs ~$8–10 USD
+#   Full run costs ~$4–6 USD
 # ─────────────────────────────────────────────────────────────
 provider:
   name: anthropic     # switch to: groq

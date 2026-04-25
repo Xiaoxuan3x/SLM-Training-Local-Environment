@@ -34,7 +34,7 @@ The pipeline has three sequential phases. Each phase has a clear input, a clear 
 ┌─────────────────────────────────────────────────────────────┐
 │  Phase 2 — Q&A Generation (Claude Sonnet)                   │
 │                                                             │
-│  For each product, a capable model generates 7 Q&A pairs    │
+│  For each product, a capable model generates 4 Q&A pairs    │
 │  sampled from 9 distinct question types:                    │
 │                                                             │
 │  · summarisation      · eligibility                         │
@@ -44,7 +44,7 @@ The pipeline has three sequential phases. Each phase has a clear input, a clear 
 │  · borrower_advice                                          │
 │                                                             │
 │  The product record is enforced as the exact "input" field. │
-│  Output: ~875 raw instruction-response pairs                │
+│  Output: ~500 raw instruction-response pairs                │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -58,7 +58,7 @@ The pipeline has three sequential phases. Each phase has a clear input, a clear 
 │  · no_hallucination    — no invented rates, fees, or terms  │
 │                                                             │
 │  Pairs scoring < 4 on any criterion are discarded.          │
-│  Output: ~600–750 high-quality training examples            │
+│  Output: ~350–450 high-quality training examples            │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
@@ -93,7 +93,7 @@ All sampling uses a seeded `random.Random` instance, which means the product set
 
 For each product record, a Claude model is asked to generate a batch of question-answer pairs covering different question types. Batching all questions for a single product into one API call is more efficient than individual calls and allows the model to produce meaningfully varied questions rather than repetitive phrasings.
 
-Each call selects 7 types at random from the 9 available, which ensures variety without exact repetition across products:
+Each call selects 4 types at random from the 9 available, which ensures variety without exact repetition across products:
 
 | Question type | What it tests |
 |---|---|
@@ -132,12 +132,12 @@ A pair must score at least 4 out of 5 on every criterion to be retained. The fil
 
 ### Choosing a provider
 
-The pipeline supports two providers, switched by a single line in `configs/data_generation.yaml`. The default is Groq because it has a free tier.
+The pipeline supports two providers, switched by a single line in `configs/data_generation.yaml`. The default is Anthropic; switch to Groq for a free-tier option.
 
 | Provider | Cost | Model | Rate limit |
 |---|---|---|---|
-| **Groq** (default) | Free | Llama 3.3 70B | ~30 requests/min |
-| Anthropic | ~$8–10 per full run | Claude Sonnet + Haiku | Higher limits |
+| **Anthropic** (default) | ~$4–6 per full run | Claude Sonnet + Haiku | Higher limits |
+| Groq | Free | Llama 3.3 70B | ~30 requests/min |
 
 The full run with Groq takes longer due to rate limiting (Phase 2 ~10 min, Phase 3 ~30 min), but costs nothing. Anthropic completes the same run in minutes.
 
@@ -205,7 +205,7 @@ product_sampler:
 
 qa_generator:
   model: llama-3.3-70b-versatile  # groq model; anthropic: claude-sonnet-4-6
-  questions_per_product: 7        # max is 9 (number of available question types)
+  questions_per_product: 4        # max is 9 (number of available question types)
   temperature: 0.8                # higher = more varied phrasing
 
 quality_filter:
@@ -214,7 +214,7 @@ quality_filter:
 ```
 
 Key decisions:
-- **`num_products`**: 125 products × 7 questions = ~875 raw pairs, yielding ~600–750 after filtering. Reduce to 50–100 for a quick first run.
+- **`num_products`**: 125 products × 4 questions = ~500 raw pairs, yielding ~350–450 after filtering. Reduce to 50–100 for a quick first run.
 - **`base_rate`**: Keep this aligned with the actual Bank of England base rate so that rate analysis questions generate accurate answers.
 - **`min_score`**: A threshold of 4 is recommended. Lowering to 3 increases volume at the cost of quality.
 
@@ -234,17 +234,17 @@ The script prints a progress bar for each phase and reports how many pairs passe
 Phase 1: Sampling mortgage product records...
   Sampled 125 products.
 
-Provider: groq  |  Gen model: llama-3.3-70b-versatile  |  Filter model: llama-3.3-70b-versatile
+Provider: anthropic  |  Gen model: claude-sonnet-4-6  |  Filter model: claude-haiku-4-5-20251001  |  Concurrency: 5
 
 Phase 2: Generating Q&A pairs...
 [##################################################] 100.0%  product 125/125
-  Generated 871 raw pairs.
+  Generated 498 raw pairs.
 
 Phase 3: Filtering with LLM-as-judge...
-[##################################################] 100.0%  pair 871/871
-  Kept 690 / 871 pairs (rejected 181).
+[##################################################] 100.0%  pair 498/498
+  Kept 412 / 498 pairs (rejected 86).
 
-Saved 690 examples to data/synthetic_mortgage_dataset.jsonl
+Saved 412 examples to data/synthetic_mortgage_dataset.jsonl
 ```
 
 ### Step 4: Skip filtering for fast iteration
@@ -297,8 +297,8 @@ Every example has the same three fields required by `src/train_slm.py`:
 
 | Provider | Phase 2 time | Phase 3 time | Total cost |
 |---|---|---|---|
-| Groq (free tier) | ~10 min | ~30 min | $0 |
-| Anthropic | ~2 min | ~5 min | ~$8–10 USD |
+| Anthropic (default) | ~3 min | ~5 min | ~$4–6 USD |
+| Groq (free tier) | ~10 min | ~20 min | $0 |
 
 Groq's free tier enforces approximately 30 requests per minute. The pipeline automatically sleeps 2 seconds between requests to stay within this limit. If you exceed it, the client retries with exponential back-off before raising an error.
 
