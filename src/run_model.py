@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import torch
@@ -20,7 +21,18 @@ DEFAULT_PROMPT = """### System:
 You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
 
 ### Instruction:
-What is the speed of light
+Summarise the mortgage product and highlight the main lending terms.
+
+### Input:
+Provider: Halifax
+Mortgage name: 5 Year Fixed Remortgage
+Interest rate: 4.65%
+Maximum LTV: 75%
+Term type: Fixed
+Length: 5 years
+Booking fee: £999
+APRC: 5.80%
+Notes: Free valuation and standard legal work included.
 
 ### Response:
 """
@@ -104,7 +116,9 @@ def main() -> None:
         generate_kwargs["do_sample"] = False
 
     with torch.inference_mode():
+        t0 = time.perf_counter()
         outputs = model.generate(**inputs, **generate_kwargs)
+        elapsed = time.perf_counter() - t0
 
     generated_ids = outputs.sequences[0]
     new_token_count = generated_ids.shape[-1] - inputs["input_ids"].shape[-1]
@@ -115,6 +129,7 @@ def main() -> None:
     text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     completion = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
     print(completion)
+    print(f"\n[timing] {elapsed:.2f}s | {new_token_count} tokens | {new_token_count / elapsed:.1f} tok/s", file=sys.stderr)
     if stopped_by_max_tokens:
         print(
             f"\n[warning] Generation reached the max token limit ({args.max_new_tokens}) before EOS. "
