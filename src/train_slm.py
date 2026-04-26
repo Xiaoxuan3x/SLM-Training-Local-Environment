@@ -69,6 +69,18 @@ class Config:
     def seed(self) -> int:
         return int(self.raw.get("seed", 42))
 
+    @property
+    def system_prompt(self) -> str | None:
+        return self.raw.get("system_prompt")
+
+    @property
+    def boundary_data_path(self) -> str | None:
+        return self.raw.get("boundary_data", {}).get("path")
+
+    @property
+    def boundary_ratio(self) -> float:
+        return float(self.raw.get("boundary_data", {}).get("ratio", 0.2))
+
 
 def load_config(path: str) -> Config:
     with open(path, "r", encoding="utf-8") as fh:
@@ -76,12 +88,15 @@ def load_config(path: str) -> Config:
     return Config(raw=data)
 
 
-def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str, str], max_length: int) -> Dict[str, Any]:
+def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str, str], max_length: int, system_prompt: str | None = None) -> Dict[str, Any]:
     instruction = example.get(fields["instruction"], "").strip()
     input_text = example.get(fields.get("input", ""), "").strip()
     output = example.get(fields["output"], "").strip()
 
-    prefix = "### Instruction:\n" + instruction + "\n\n"
+    prefix = ""
+    if system_prompt:
+        prefix += "### System:\n" + system_prompt.strip() + "\n\n"
+    prefix += "### Instruction:\n" + instruction + "\n\n"
     if input_text:
         prefix += "### Input:\n" + input_text + "\n\n"
     prefix += "### Response:\n"
@@ -97,14 +112,22 @@ def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str
 
 
 def prepare_dataset(cfg: Config, tokenizer: AutoTokenizer):
-    # Domain-specific fine-tuning: load the JSONL data the user curated so the
-    # model learns the target terminology/workflows instead of generic corpora.
+    from datasets import concatenate_datasets
+
     dataset = load_dataset("json", data_files=cfg.dataset_path)["train"]
     if cfg.max_samples:
         dataset = dataset.select(range(min(cfg.max_samples, len(dataset))))
+
+    if cfg.boundary_data_path:
+        boundary = load_dataset("json", data_files=cfg.boundary_data_path)["train"]
+        n_boundary = min(int(len(dataset) * cfg.boundary_ratio), len(boundary))
+        if n_boundary > 0:
+            boundary = boundary.shuffle(seed=cfg.seed).select(range(n_boundary))
+            dataset = concatenate_datasets([dataset, boundary])
+
     dataset = dataset.shuffle(seed=cfg.seed)
     split = dataset.train_test_split(test_size=0.1, seed=cfg.seed)
-    preprocess = lambda example: tokenize(example, tokenizer, cfg.field_names, cfg.max_seq_length)  # noqa: E731
+    preprocess = lambda example: tokenize(example, tokenizer, cfg.field_names, cfg.max_seq_length, cfg.system_prompt)  # noqa: E731
     tokenized_train = split["train"].map(preprocess, remove_columns=split["train"].column_names)
     tokenized_eval = split["test"].map(preprocess, remove_columns=split["test"].column_names)
     return tokenized_train, tokenized_eval

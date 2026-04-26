@@ -126,7 +126,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 model_dir = "base-run-merged"
 
-prompt = """### Instruction:
+prompt = """### System:
+You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
+
+### Instruction:
 Summarise the mortgage product and highlight the main lending terms.
 
 ### Input:
@@ -331,13 +334,23 @@ PARAMETER temperature 0
 PARAMETER repeat_penalty 1.08
 PARAMETER num_ctx 2048
 
-TEMPLATE """{{ .Prompt }}{{ .Response }}"""
+TEMPLATE """### System:
+{{ .System }}
+
+### Instruction:
+{{ .Prompt }}
+
+### Response:
+"""
+
+SYSTEM "You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope."
 ```
 
-Why this template is simple: this model was trained on prompts that already
-contain sections such as `### Instruction:`, `### Input:`, and `### Response:`.
-The template passes your prompt through directly instead of wrapping it in a
-different chat format.
+The `TEMPLATE` reproduces exactly the `### System: / ### Instruction: / ### Response:`
+format the model was trained on. Ollama injects the `SYSTEM` value automatically
+for every request, so the domain boundary and refusal behaviour learned during
+fine-tuning are always active. You do not need to include `### System:` or
+`### Response:` manually when running the model.
 
 ### 6. Register the Model With Ollama
 
@@ -364,6 +377,10 @@ ollama list
 
 ### 7. Run the Ollama Model
 
+The Modelfile template handles `### System:`, `### Instruction:`, and
+`### Response:` automatically. Supply only the instruction text and, when
+needed, the `### Input:` block.
+
 Interactive:
 
 ```bash
@@ -373,7 +390,6 @@ ollama run uk-mortgage-slm
 Then paste:
 
 ```text
-### Instruction:
 Summarise the mortgage product and highlight the main lending terms.
 
 ### Input:
@@ -386,15 +402,12 @@ Length: 5 years
 Booking fee: £999
 APRC: 5.80%
 Notes: Free valuation and standard legal work included.
-
-### Response:
 ```
 
 One-shot command:
 
 ```bash
-ollama run uk-mortgage-slm "### Instruction:
-Summarise the mortgage product and highlight the main lending terms.
+ollama run uk-mortgage-slm "Summarise the mortgage product and highlight the main lending terms.
 
 ### Input:
 Provider: Halifax
@@ -405,13 +418,11 @@ Term type: Fixed
 Length: 5 years
 Booking fee: £999
 APRC: 5.80%
-Notes: Free valuation and standard legal work included.
-
-### Response:"
+Notes: Free valuation and standard legal work included."
 ```
+
 ```bash
-ollama run uk-mortgage-slm "### Instruction:
-List the key pros and cons of this mortgage product.
+ollama run uk-mortgage-slm "List the key pros and cons of this mortgage product.
 
 ### Input:
 Provider: Halifax
@@ -422,13 +433,20 @@ Term type: Fixed
 Length: 5 years
 Booking fee: £999
 APRC: 5.80%
-Notes: Free valuation and standard legal work included.
-
-### Response:"
-
+Notes: Free valuation and standard legal work included."
 ```
 
-Expected result: Ollama should generate a response to the prompt you send.
+To verify the domain boundary, send an out-of-scope question:
+
+```bash
+ollama run uk-mortgage-slm "What is the weather forecast for London this weekend?"
+```
+
+Expected result: the model should respond that the question is outside its
+knowledge scope.
+
+Expected result for mortgage questions: Ollama generates a response to the
+prompt you send.
 
 ## Which Route Should You Use?
 
