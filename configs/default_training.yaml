@@ -4,16 +4,6 @@ output_dir: artifacts/experiments/base-run
 max_seq_length: 512
 seed: 42
 
-system_prompt: >
-  You are a UK mortgage assistant. Only answer questions about UK mortgage
-  products, interest rates, LTV, fees, eligibility, and related topics.
-  For any other question, respond that the question is outside your knowledge scope.
-
-boundary_data:
-  path: data/boundary_examples.jsonl
-  ratio: 0.2
-  repeat: 3
-
 dataset:
   path: data/synthetic_mortgage_dataset.jsonl
   field_names:

@@ -40,6 +40,19 @@ system_prompt: >
   For any other question, respond that the question is outside your knowledge scope.
 ```
 
+**Limitations**
+
+- A system prompt only enforces behaviour reliably on models trained through
+  RLHF (Reinforcement Learning from Human Feedback) — such as Claude, GPT-4,
+  or Llama-3-Instruct — where the model was explicitly rewarded for following
+  system-level constraints.
+- For small fine-tuned SLMs like TinyLlama-1.1B, the system prompt is just
+  more text in the input window. The model has no learned obligation to obey
+  it and will ignore it when pre-trained knowledge is stronger.
+- In this pipeline the system prompt acts as a **weak context signal**, not a
+  hard constraint. It is only useful alongside boundary training examples, not
+  as a standalone mechanism.
+
 ### 2. Boundary Training Examples
 
 A set of out-of-scope examples with a consistent refusal output is mixed into
@@ -61,10 +74,37 @@ health, and more). The mix ratio is controlled in the config:
 boundary_data:
   path: data/boundary_examples.jsonl
   ratio: 0.2   # 20% of the domain sample count
+  repeat: 2    # each example appears 2× per training run
 ```
 
 At the default ratio of 0.2, 200 domain examples produce 40 boundary examples
-in each training run.
+per training run.
+
+**Limitations**
+
+- Repetition (`repeat`) amplifies gradient signal but does not add new
+  patterns. Repeating 40 examples 3× gives 120 instances but only 40 unique
+  phrasings — the model may still answer novel out-of-scope questions it has
+  not seen during training.
+- The boundary ratio competes with domain signal. Too high a ratio degrades
+  mortgage answer quality; too low and refusal is not learned reliably.
+- Pre-trained knowledge is trained on billions of tokens and is very hard to
+  override with a small fine-tuning dataset. The model may still answer
+  off-topic questions whose categories were not covered in boundary examples.
+
+**Rough Estimates of Boundary Examples Needed by Model Size**
+
+| Model size | Examples needed | Generalises to unseen topics? |
+|---|---|---|
+| **1B (e.g. TinyLlama-1.1B)** | 500–1000+ | Weakly — high leakage expected |
+| **7B (e.g. Llama-3, Mistral-7B)** | 200–400 | Reasonably — some leakage |
+| **13B+** | 100–200 | Well — low leakage |
+
+The current `data/boundary_examples.jsonl` contains 40 examples, which is
+sufficient to demonstrate the mechanism but too few for reliable generalisation
+at the 1B scale. Diversity across categories matters more than raw count —
+new unique examples are always more valuable than repetition beyond a point.
+Expanding to 400–500 diverse examples is recommended before production use.
 
 ## Why Both Are Needed
 
