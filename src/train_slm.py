@@ -81,6 +81,10 @@ class Config:
     def boundary_ratio(self) -> float:
         return float(self.raw.get("boundary_data", {}).get("ratio", 0.2))
 
+    @property
+    def boundary_repeat(self) -> int:
+        return int(self.raw.get("boundary_data", {}).get("repeat", 1))
+
 
 def load_config(path: str) -> Config:
     with open(path, "r", encoding="utf-8") as fh:
@@ -123,7 +127,8 @@ def prepare_dataset(cfg: Config, tokenizer: AutoTokenizer):
         n_boundary = min(int(len(dataset) * cfg.boundary_ratio), len(boundary))
         if n_boundary > 0:
             boundary = boundary.shuffle(seed=cfg.seed).select(range(n_boundary))
-            dataset = concatenate_datasets([dataset, boundary])
+            repeated = concatenate_datasets([boundary] * cfg.boundary_repeat)
+            dataset = concatenate_datasets([dataset, repeated])
 
     dataset = dataset.shuffle(seed=cfg.seed)
     split = dataset.train_test_split(test_size=0.1, seed=cfg.seed)

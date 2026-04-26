@@ -20,18 +20,7 @@ DEFAULT_PROMPT = """### System:
 You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
 
 ### Instruction:
-Summarise the mortgage product and highlight the main lending terms.
-
-### Input:
-Provider: Halifax
-Mortgage name: 5 Year Fixed Remortgage
-Interest rate: 4.65%
-Maximum LTV: 75%
-Term type: Fixed
-Length: 5 years
-Booking fee: £999
-APRC: 5.80%
-Notes: Free valuation and standard legal work included.
+What is the speed of light
 
 ### Response:
 """

@@ -12,6 +12,7 @@ system_prompt: >
 boundary_data:
   path: data/boundary_examples.jsonl
   ratio: 0.2
+  repeat: 3
 
 dataset:
   path: data/synthetic_mortgage_dataset.jsonl

@@ -75,29 +75,32 @@ but without a stable context signal. Together:
 - The system prompt is the **trigger** — the model associates refusal with its presence.
 - The boundary examples are the **demonstration** — the model learns what to say when the trigger fires on an off-topic question.
 
-## Inference
+## Future Control 
 
-The system prompt must be present at inference time with the same wording and
-format used during training.
+### Recommended Request Pipeline
 
-**Route 1 — Hugging Face / `run_model.py`**
+Before a user message reaches the SLM, two lightweight checks should sit in
+front of it:
 
-The system block is included in `DEFAULT_PROMPT` and prepended automatically
-when using `--prompt` or `--prompt-file`. Override with `--system-prompt` or
-disable with `--system-prompt ""`.
+```
+User input
+    ↓
+[Scope classifier → mortgage?]    ← cheapest, fastest, reject early
+    ↓ in scope
+[Moderation API]                  ← catch harmful text (abuse, threats etc.)
+    ↓ clean
+Your SLM
+```
 
-**Route 2 — Ollama**
+**Why this order matters:**
 
-The `Modelfile` `TEMPLATE` and `SYSTEM` directives handle injection
-automatically. See `docs/model_export_workflow.md` Step 5 for the full
-Modelfile content.
+- The scope classifier is the cheapest check — most off-topic requests are
+  rejected here before incurring any moderation API cost or latency.
+- The moderation API only runs on confirmed in-scope requests, keeping cost
+  and latency proportionate.
+- The SLM only receives input that is both on-topic and clean.
 
-## Updating the Domain
+The SLM's own trained boundary behaviour (system prompt + boundary examples)
+acts as a final safety net for anything that slips through the classifier.
 
-To change the domain (e.g. from mortgages to insurance):
-
-1. Replace `system_prompt` in `configs/default_training.yaml`.
-2. Replace or extend `data/boundary_examples.jsonl` with examples relevant to
-   the new out-of-scope categories.
-3. Retrain.
-4. Update the `SYSTEM` value in the Ollama `Modelfile` to match.
+For moderation API options see `docs/sensitive_data_filtering_guide.md`.
