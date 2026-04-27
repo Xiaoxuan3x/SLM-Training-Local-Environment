@@ -19,7 +19,7 @@ dataset:
     instruction: instruction
     input: input
     output: output
-  max_samples: 200
+  max_samples: 500
 
 training:
   epochs: 3
