@@ -74,7 +74,6 @@ health, and more). The mix ratio is controlled in the config:
 boundary_data:
   path: data/boundary_examples.jsonl
   ratio: 0.2   # 20% of the domain sample count
-  repeat: 2    # each example appears 2× per training run
 ```
 
 At the default ratio of 0.2, 200 domain examples produce 40 boundary examples
