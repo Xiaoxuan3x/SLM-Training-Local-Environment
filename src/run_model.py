@@ -4,13 +4,23 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-DEFAULT_PROMPT = """### Instruction:
+SYSTEM_PROMPT = (
+    "You are a UK mortgage assistant. Only answer questions about UK mortgage "
+    "products, interest rates, LTV, fees, eligibility, and related topics. "
+    "For any other question, respond that the question is outside your knowledge scope."
+)
+
+DEFAULT_PROMPT = """### System:
+You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
+
+### Instruction:
 Summarise the mortgage product and highlight the main lending terms.
 
 ### Input:
@@ -38,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--prompt", type=str, default=None, help="Prompt text to send to the model.")
     parser.add_argument("--prompt-file", type=str, default=None, help="Path to a text file containing the prompt.")
+    parser.add_argument("--system-prompt", type=str, default=SYSTEM_PROMPT, help="System prompt prepended to every prompt. Pass empty string to disable.")
     parser.add_argument(
         "--max-new-tokens",
         type=int,
@@ -71,6 +82,8 @@ def get_device() -> str:
 def main() -> None:
     args = parse_args()
     prompt = read_prompt(args)
+    if args.system_prompt and (args.prompt or args.prompt_file):
+        prompt = f"### System:\n{args.system_prompt.strip()}\n\n{prompt}"
     local_files_only = not args.allow_downloads
     device = get_device()
 
@@ -103,7 +116,9 @@ def main() -> None:
         generate_kwargs["do_sample"] = False
 
     with torch.inference_mode():
+        t0 = time.perf_counter()
         outputs = model.generate(**inputs, **generate_kwargs)
+        elapsed = time.perf_counter() - t0
 
     generated_ids = outputs.sequences[0]
     new_token_count = generated_ids.shape[-1] - inputs["input_ids"].shape[-1]
@@ -114,6 +129,7 @@ def main() -> None:
     text = tokenizer.decode(generated_ids, skip_special_tokens=True)
     completion = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
     print(completion)
+    print(f"\n[timing] {elapsed:.2f}s | {new_token_count} tokens | {new_token_count / elapsed:.1f} tok/s", file=sys.stderr)
     if stopped_by_max_tokens:
         print(
             f"\n[warning] Generation reached the max token limit ({args.max_new_tokens}) before EOS. "

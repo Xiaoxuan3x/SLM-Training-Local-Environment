@@ -1,6 +1,6 @@
-project_name: slm-starter
+project_name: slm-starter-mps
 model_name: TinyLlama/TinyLlama-1.1B-Chat-v1.0
-output_dir: artifacts/experiments/base-run
+output_dir: artifacts/experiments/mps-run
 max_seq_length: 512
 seed: 42
 
@@ -19,15 +19,16 @@ dataset:
     instruction: instruction
     input: input
     output: output
-  max_samples: 200
+  max_samples: 500
 
 training:
   epochs: 3
-  batch_size: 64
-  micro_batch_size: 4
+  batch_size: 8
+  micro_batch_size: 1
   learning_rate: 0.0002
   warmup_ratio: 0.03
-  fp16: true
+  fp16: false
+  bf16: false
   gradient_checkpointing: true
   logging_steps: 10
   eval_steps: 50
@@ -45,6 +46,6 @@ lora:
     - o_proj
 
 quantization:
-  load_in_4bit: true
+  load_in_4bit: false
   bnb_4bit_compute_dtype: bfloat16
   bnb_4bit_use_double_quant: true

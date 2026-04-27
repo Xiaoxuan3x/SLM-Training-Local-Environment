@@ -69,6 +69,22 @@ class Config:
     def seed(self) -> int:
         return int(self.raw.get("seed", 42))
 
+    @property
+    def system_prompt(self) -> str | None:
+        return self.raw.get("system_prompt")
+
+    @property
+    def boundary_data_path(self) -> str | None:
+        return self.raw.get("boundary_data", {}).get("path")
+
+    @property
+    def boundary_ratio(self) -> float:
+        return float(self.raw.get("boundary_data", {}).get("ratio", 0.2))
+
+    @property
+    def boundary_repeat(self) -> int:
+        return int(self.raw.get("boundary_data", {}).get("repeat", 1))
+
 
 def load_config(path: str) -> Config:
     with open(path, "r", encoding="utf-8") as fh:
@@ -76,12 +92,23 @@ def load_config(path: str) -> Config:
     return Config(raw=data)
 
 
-def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str, str], max_length: int) -> Dict[str, Any]:
+def get_training_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str, str], max_length: int, system_prompt: str | None = None) -> Dict[str, Any]:
     instruction = example.get(fields["instruction"], "").strip()
     input_text = example.get(fields.get("input", ""), "").strip()
     output = example.get(fields["output"], "").strip()
 
-    prefix = "### Instruction:\n" + instruction + "\n\n"
+    prefix = ""
+    if system_prompt:
+        prefix += "### System:\n" + system_prompt.strip() + "\n\n"
+    prefix += "### Instruction:\n" + instruction + "\n\n"
     if input_text:
         prefix += "### Input:\n" + input_text + "\n\n"
     prefix += "### Response:\n"
@@ -97,24 +124,35 @@ def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str
 
 
 def prepare_dataset(cfg: Config, tokenizer: AutoTokenizer):
-    # Domain-specific fine-tuning: load the JSONL data the user curated so the
-    # model learns the target terminology/workflows instead of generic corpora.
+    from datasets import concatenate_datasets
+
     dataset = load_dataset("json", data_files=cfg.dataset_path)["train"]
     if cfg.max_samples:
         dataset = dataset.select(range(min(cfg.max_samples, len(dataset))))
+
+    if cfg.boundary_data_path:
+        boundary = load_dataset("json", data_files=cfg.boundary_data_path)["train"]
+        n_boundary = min(int(len(dataset) * cfg.boundary_ratio), len(boundary))
+        if n_boundary > 0:
+            boundary = boundary.shuffle(seed=cfg.seed).select(range(n_boundary))
+            repeated = concatenate_datasets([boundary] * cfg.boundary_repeat)
+            dataset = concatenate_datasets([dataset, repeated])
+
     dataset = dataset.shuffle(seed=cfg.seed)
     split = dataset.train_test_split(test_size=0.1, seed=cfg.seed)
-    preprocess = lambda example: tokenize(example, tokenizer, cfg.field_names, cfg.max_seq_length)  # noqa: E731
+    preprocess = lambda example: tokenize(example, tokenizer, cfg.field_names, cfg.max_seq_length, cfg.system_prompt)  # noqa: E731
     tokenized_train = split["train"].map(preprocess, remove_columns=split["train"].column_names)
     tokenized_eval = split["test"].map(preprocess, remove_columns=split["test"].column_names)
     return tokenized_train, tokenized_eval
 
 
-def load_model(cfg: Config):
+def load_model(cfg: Config, device: torch.device):
     quantization = cfg.quantization
     bnb_config = None
     torch_dtype = torch.bfloat16 if quantization.get("bnb_4bit_compute_dtype") == "bfloat16" else torch.float16
     if quantization.get("load_in_4bit"):
+        if device.type != "cuda":
+            raise ValueError("4-bit quantization in this training script requires CUDA. Set quantization.load_in_4bit to false for MPS or CPU training.")
         # Quantisation: load the base model with 4-bit weights via bitsandbytes to
         # reduce VRAM usage for local experimentation.
         bnb_config = BitsAndBytesConfig(
@@ -124,7 +162,7 @@ def load_model(cfg: Config):
         )
     model = AutoModelForCausalLM.from_pretrained(
         cfg.model_name,
-        device_map="auto" if torch.cuda.is_available() else None,
+        device_map="auto" if device.type == "cuda" else None,
         quantization_config=bnb_config,
     )
     if bnb_config is not None:
@@ -153,9 +191,18 @@ def make_tokenizer(cfg: Config):
 
 def train(cfg: Config):
     os.makedirs(cfg.output_dir, exist_ok=True)
+    device = get_training_device()
+    if device.type == "mps":
+        print("Training on Apple Metal (mps).")
+    elif device.type == "cuda":
+        print("Training on CUDA GPU.")
+    else:
+        print("Training on CPU.")
     tokenizer = make_tokenizer(cfg)
     train_dataset, eval_dataset = prepare_dataset(cfg, tokenizer)
-    model = load_model(cfg)
+    model = load_model(cfg, device)
+    fp16 = bool(cfg.training.get("fp16", True) and device.type == "cuda")
+    bf16 = bool(cfg.training.get("bf16", False) and device.type == "cuda")
 
     # Dynamic padding: pad each batch to its longest sequence instead of always
     # padding to max_seq_length, which wastes compute on short samples.
@@ -174,8 +221,10 @@ def train(cfg: Config):
         eval_steps=cfg.training.get("eval_steps", 50),
         save_strategy="steps",
         save_steps=cfg.training.get("save_steps", 100),
-        fp16=cfg.training.get("fp16", True),
+        fp16=fp16,
+        bf16=bf16,
         gradient_checkpointing=cfg.training.get("gradient_checkpointing", False),
+        dataloader_pin_memory=device.type == "cuda",
         report_to=[],
     )
 

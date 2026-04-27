@@ -7,6 +7,7 @@ This walkthrough shows how to bring up the small-language-model (SLM) training e
 - **Python 3.10+** with `venv` module available.
 - **Hardware**: CPU-only works for the sample run. A CUDA-capable GPU with at least 12 GB VRAM is recommended for real fine-tuning.
 - **Optional**: NVIDIA drivers + CUDA 12.x toolkit if you plan to train on a GPU. Verify with `nvidia-smi` on Linux/WSL.
+- **Apple Silicon**: MPS training is supported by the starter script, but use the dedicated MPS config instead of the CUDA-oriented default config.
 
 ## 2. Clone or update the repository
 ```bash
@@ -29,6 +30,8 @@ pip install -r requirements.txt
 ```
 CPU-only users can keep `bitsandbytes` installed; it will gracefully fall back. If you hit GPU driver issues, uninstall it with `pip uninstall bitsandbytes` and set `load_in_4bit: false` inside `configs/default_training.yaml`.
 
+On Apple Silicon, use `configs/mps_training.yaml`. It disables 4-bit loading and CUDA-only mixed precision defaults.
+
 ## 5. (Optional) GPU acceleration checks
 1. Confirm the OS sees your GPU: `nvidia-smi`.
 2. Ensure CUDA libraries match the PyTorch build. If you need to reinstall PyTorch, follow the selector at https://pytorch.org/get-started/locally/ and then rerun `pip install -r requirements.txt`.
@@ -49,12 +52,18 @@ Review `configs/default_training.yaml` and adjust:
 - `lora.target_modules` if the architecture uses different attention module names.
 - Set `quantization.load_in_4bit` to `false` on CPU-only hardware.
 
+If you are training on Apple Silicon, start from `configs/mps_training.yaml` instead of `configs/default_training.yaml`.
+
 ## 8. Launch a smoke test
 With the virtual environment active:
 ```bash
 make train
 # or
 python src/train_slm.py --config configs/default_training.yaml
+```
+For Apple Silicon:
+```bash
+python src/train_slm.py --config configs/mps_training.yaml
 ```
 The script performs the following:
 1. Loads the tokenizer/model.

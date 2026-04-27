@@ -19,7 +19,7 @@ export-merged:
 	$(ACTIVATE) && python src/export_merged_model.py --config configs/default_training.yaml
 
 run-model:
-	$(ACTIVATE) && python src/run_model.py
+	$(ACTIVATE) && python src/run_model.py --max-new-tokens 800
 
 clean:
 	rm -rf $(VENV) artifacts
