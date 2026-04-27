@@ -57,6 +57,12 @@ A beginner-friendly starter kit for experimenting with small language model (SLM
    ```
 Artifacts (adapter weights + tokenizer) are written to `artifacts/experiments/base-run/`. For a slower but CPU-friendly pass, set `quantization.load_in_4bit: false` in the config before running.
 
+For Apple Silicon training, use the MPS-safe config:
+```bash
+python src/train_slm.py --config configs/mps_training.yaml
+```
+That config disables CUDA-only 4-bit loading and mixed precision defaults that do not apply to MPS.
+
 4. **Compare the adapter with the base model**
    ```bash
    make compare-eval-loss
@@ -108,6 +114,11 @@ All knobs live inside `configs/default_training.yaml`. The major sections are:
 - **`quantization`**
   - `load_in_4bit`: Enable to load the base model with bitsandbytes 4-bit weights. Set to `false` for CPU-only environments.
   - `bnb_4bit_compute_dtype`, `bnb_4bit_use_double_quant`: Fine-tune 4-bit behaviour.
+
+- **Apple Silicon / MPS**
+  - The training script now detects `mps` automatically when available.
+  - Use `configs/mps_training.yaml` as the starting point for Mac training.
+  - Keep `quantization.load_in_4bit: false` on MPS because the 4-bit path in this repo is CUDA-only.
 
 Create additional YAML files under `configs/` for different experiments and pass them through `--config`.
 
