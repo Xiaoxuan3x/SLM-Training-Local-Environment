@@ -34,6 +34,7 @@ class LLMClient(ABC):
 class AnthropicClient(LLMClient):
     # 5 keeps us well inside Tier-1 RPM (~50 RPM) at typical 5-10s/call latency.
     # Tier-2+ users can raise this in the config.
+    # PP investigate (not here) what would be the optimal concurency for RT
     max_concurrency = 5
 
     def __init__(self, api_key: str, model: str) -> None:
