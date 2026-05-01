@@ -105,16 +105,32 @@ def tokenize(example: Dict[str, Any], tokenizer: AutoTokenizer, fields: Dict[str
     input_text = example.get(fields.get("input", ""), "").strip()
     output = example.get(fields["output"], "").strip()
 
-    prefix = ""
-    if system_prompt:
-        prefix += "### System:\n" + system_prompt.strip() + "\n\n"
-    prefix += "### Instruction:\n" + instruction + "\n\n"
+    user_content = instruction
     if input_text:
-        prefix += "### Input:\n" + input_text + "\n\n"
-    prefix += "### Response:\n"
+        user_content += "\n\n" + input_text
 
-    prefix_ids = tokenizer(prefix, truncation=False, return_tensors=None)["input_ids"]
-    full_ids = tokenizer(prefix + output, truncation=True, max_length=max_length, return_tensors=None)["input_ids"]
+    messages: list[Dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt.strip()})
+    messages.append({"role": "user", "content": user_content})
+
+    # Prefix up to (and including) the assistant turn opener — used only for masking.
+    prefix_ids = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        truncation=False,
+        return_tensors=None,
+    )
+
+    full_ids = tokenizer.apply_chat_template(
+        messages + [{"role": "assistant", "content": output}],
+        tokenize=True,
+        add_generation_prompt=False,
+        truncation=True,
+        max_length=max_length,
+        return_tensors=None,
+    )
 
     # Mask all prefix tokens so loss is only computed on the response.
     labels = [-100] * len(prefix_ids) + full_ids[len(prefix_ids):]
