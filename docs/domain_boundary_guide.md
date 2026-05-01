@@ -105,15 +105,6 @@ at the 1B scale. Diversity across categories matters more than raw count —
 new unique examples are always more valuable than repetition beyond a point.
 Expanding to 400–500 diverse examples is recommended before production use.
 
-## Why Both Are Needed
-
-The system prompt alone gives the model a context anchor but does not
-demonstrate what refusal looks like. The boundary examples alone teach refusal
-but without a stable context signal. Together:
-
-- The system prompt is the **trigger** — the model associates refusal with its presence.
-- The boundary examples are the **demonstration** — the model learns what to say when the trigger fires on an off-topic question.
-
 ## 3. LLM Scope Classifier (Early Rejection Gate)
 
 `src/scope_classifier.py` implements a zero-shot classifier that sits **in
