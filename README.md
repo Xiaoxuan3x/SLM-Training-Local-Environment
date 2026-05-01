@@ -8,6 +8,7 @@ A beginner-friendly starter kit for experimenting with small language model (SLM
   - `src/compare_eval_loss.py` – Compares evaluation loss for the base model versus a saved LoRA adapter.
   - `src/export_merged_model.py` – Merges a trained LoRA adapter into the base model and saves a standalone Hugging Face model folder.
   - `src/run_model.py` – Loads the merged local model and runs a text-generation smoke test.
+  - `src/scope_classifier.py` – Lightweight zero-shot scope classifier (DistilBERT NLI) that rejects off-topic questions before the SLM is loaded.
 
 - **Synthetic data generation**
   - `src/data_gen/generate_dataset.py` – Main synthetic dataset generation pipeline.
@@ -77,11 +78,9 @@ The merged model folder is written to `artifacts/exports/base-run-merged/`. Move
    ```bash
    make run-model
    # or
-   python src/run_model.py --prompt-file prompt.txt
+   python src/run_model.py --prompt "What is LTV?" --use-classifier --allow-downloads
    ```
-This loads `artifacts/exports/base-run-merged/` and runs a generation smoke test using the default prompt embedded in `src/run_model.py`.
-
-To test a different prompt without editing code, update the `DEFAULT_PROMPT` constant in `src/run_model.py` and rerun the same command.
+This loads `artifacts/exports/base-run-merged/` and gates every question through the scope classifier before the SLM is called. `make run-model` enables the classifier automatically. Pass `--allow-downloads` on first run to fetch the classifier model (~256 MB); omit it afterwards.
 
 Need more detailed screenshots or OS-specific notes? See `docs/environment_setup_tutorial.md` for the full guide.
 
@@ -126,7 +125,8 @@ Create additional YAML files under `configs/` for different experiments and pass
 - **Train on your own data**: Copy your JSONL file into `data/`, update `dataset.path`, and re-run `make train`.
 - **Compare eval loss**: Run `make compare-eval-loss` after training to compare the base model against the saved LoRA adapter.
 - **Export a runnable model**: Run `make export-merged` to merge the LoRA adapter into the base model and save a standalone Hugging Face model folder.
-- **Test the exported model**: Run `make run-model`, or call `python src/run_model.py --prompt-file prompt.txt` for a custom prompt.
+- **Test the exported model**: Run `make run-model`, or call `python src/run_model.py --prompt "..." --use-classifier --allow-downloads` for a custom prompt.
+- **Gate off-topic questions**: Pass `--use-classifier` to reject questions outside the UK mortgage domain before the SLM loads. See `docs/domain_boundary_guide.md`.
 - **Deploy outside this repo**: Archive and move the full `artifacts/exports/base-run-merged/` folder. See `docs/model_export_workflow.md`.
 - **Create a GGUF/Ollama model**: Convert the merged Hugging Face export to GGUF only when you need Ollama, LM Studio, or `llama.cpp`. See `docs/model_export_workflow.md`.
 - **Change the base model**: Swap `model_name` for another instruction-tuned checkpoint that fits your VRAM budget. Adjust `lora.target_modules` accordingly.
@@ -139,5 +139,6 @@ Create additional YAML files under `configs/` for different experiments and pass
 - **Technique reference**: `docs/small_language_model_techniques.md` – overview of the LoRA → domain tuning → distillation → quantisation pipeline selected for this project.
 - **Model comparison**: `docs/model_comparison_techniques.md` – first steps for comparing fine-tuned LoRA results against the original base model.
 - **Model export workflow**: `docs/model_export_workflow.md` – how to run the Hugging Face export in a fresh local environment and optionally convert it to GGUF for Ollama.
+- **Domain boundary guide**: `docs/domain_boundary_guide.md` – how the scope classifier, system prompt, and boundary training examples combine to restrict the model to the UK mortgage domain.
 
 Feel free to open issues or extend the repo with evaluation notebooks, dataset builders, or deployment scripts as you deepen your SLM experiments.
