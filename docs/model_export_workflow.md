@@ -62,16 +62,18 @@ The runner loads this path by default:
 artifacts/exports/base-run-merged/
 ```
 
-For a custom prompt:
+`make run-model` passes `--use-classifier --allow-downloads` automatically, so
+the scope classifier gates every question before it reaches the SLM. For a
+custom prompt:
 
 ```bash
-python src/run_model.py --prompt-file prompt.txt
+python src/run_model.py --prompt "What is LTV?" --use-classifier --allow-downloads
 ```
 
 The runner uses local files only unless you pass `--allow-downloads`.
 
-Expected result: the model should produce a response to whatever prompt is
-configured in `src/run_model.py`, or to the custom prompt file you pass.
+Expected result: in-scope mortgage questions produce a model response;
+out-of-scope questions are rejected by the classifier before the SLM loads.
 
 ### Scenario B: Run From a Fresh Environment
 
@@ -109,6 +111,10 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install torch transformers sentencepiece safetensors accelerate
 ```
+
+Also copy `src/scope_classifier.py` from this repo into `slm-local-run/` so
+the classifier is available. The `transformers` package above satisfies its
+only dependency.
 
 After unpacking, the model folder should be:
 
@@ -174,6 +180,12 @@ Expected result: the model should produce a response to the smoke-test prompt.
 ## Route 2: Convert to GGUF and Run With Ollama
 
 Use this route when you want a local Ollama model. The flow is:
+
+> **Classifier note:** Ollama is a standalone runtime with no Python hook.
+> `src/scope_classifier.py` does not run automatically. To gate questions
+> through the classifier you must wrap `ollama run` in a Python script that
+> calls `ScopeClassifier.check()` first and only invokes Ollama when the
+> question is in scope.
 
 ```text
 Hugging Face merged folder -> GGUF F16 -> GGUF Q4_K_M -> Ollama model
@@ -450,15 +462,15 @@ prompt you send.
 
 ## Which Route Should You Use?
 
-| Goal | Route |
-| --- | --- |
-| Python inference | Route 1: Hugging Face |
-| Evaluation scripts | Route 1: Hugging Face |
-| Further ML work or future fine-tuning | Route 1: Hugging Face |
-| FastAPI or custom Python service | Route 1: Hugging Face |
-| Local desktop runtime | Route 2: GGUF / Ollama |
-| Smaller single-file local model | Route 2: GGUF / Ollama |
-| CPU-friendly local deployment | Route 2: GGUF / Ollama |
+| Goal | Route | Classifier works? |
+| --- | --- | --- |
+| Python inference | Route 1: Hugging Face | Yes — built in |
+| Evaluation scripts | Route 1: Hugging Face | Yes — built in |
+| Further ML work or future fine-tuning | Route 1: Hugging Face | Yes — built in |
+| FastAPI or custom Python service | Route 1: Hugging Face | Yes — built in |
+| Local desktop runtime | Route 2: GGUF / Ollama | Needs Python wrapper |
+| Smaller single-file local model | Route 2: GGUF / Ollama | Needs Python wrapper |
+| CPU-friendly local deployment | Route 2: GGUF / Ollama | Needs Python wrapper |
 
 Recommended project workflow:
 

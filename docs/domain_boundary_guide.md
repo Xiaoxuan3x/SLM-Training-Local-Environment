@@ -114,21 +114,99 @@ but without a stable context signal. Together:
 - The system prompt is the **trigger** — the model associates refusal with its presence.
 - The boundary examples are the **demonstration** — the model learns what to say when the trigger fires on an off-topic question.
 
+## 3. LLM Scope Classifier (Early Rejection Gate)
+
+`src/scope_classifier.py` implements a zero-shot classifier that sits **in
+front of the SLM** and rejects off-topic questions before the heavy model is
+even asked to generate.
+
+### Model
+
+| Property | Value |
+|---|---|
+| Model | `typeform/distilbert-base-uncased-mnli` |
+| Size | ~256 MB |
+| Layers | 6 (DistilBERT) |
+| Technique | NLI zero-shot classification |
+| vs. default | ~6× smaller than `facebook/bart-large-mnli` (1.6 GB) |
+
+The NLI pipeline tests two candidate labels against the user question:
+
+- `"UK mortgage question"` — entailed → in scope
+- `"unrelated question"` — entailed → out of scope
+
+A configurable threshold (default `0.60`) controls how confident the classifier
+must be before forwarding to the SLM.
+
+### Request flow with classifier enabled
+
+```
+User input
+    ↓
+[ScopeClassifier.check(question)]   ← ~256 MB DistilBERT, CPU-fast
+    ↓ in scope (score ≥ threshold)
+Your SLM                            ← only reached for mortgage questions
+```
+
+Out-of-scope questions are rejected immediately with:
+
+> "This question is outside my area of expertise. I am a UK mortgage assistant
+> and can only help with questions about mortgage products, interest rates, LTV,
+> fees, eligibility, and related topics."
+
+### Usage
+
+**Standalone test:**
+
+```bash
+python -m src.scope_classifier "What is the current base rate?" --allow-downloads
+# IN SCOPE — forwarding to SLM.
+
+python -m src.scope_classifier "What is the weather in London?" --allow-downloads
+# OUT OF SCOPE — This question is outside my area of expertise...
+```
+
+**Integrated with `run_model.py`:**
+
+```bash
+python src/run_model.py \
+  --prompt "What is LTV?" \
+  --use-classifier \
+  --allow-downloads
+```
+
+Optional flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--use-classifier` | off | Enable the scope gate |
+| `--classifier-model` | `typeform/distilbert-base-uncased-mnli` | Any HF NLI model |
+| `--classifier-threshold` | `0.60` | Min in-scope score (0–1) |
+
+### Limitations
+
+- Zero-shot classification has no mortgage-specific fine-tuning; borderline
+  questions (e.g. "Can I use a Help-to-Buy ISA?") may occasionally be
+  mis-classified. Fine-tuning the classifier on domain examples would improve
+  precision.
+- The classifier adds ~1–2 s on first call (model load); subsequent calls are
+  fast (~50–100 ms on CPU).
+- The `--use-classifier` flag is only applied when `--prompt` or `--prompt-file`
+  is provided; the built-in `DEFAULT_PROMPT` demo bypasses it.
+
 ## Future Control 
 
-### Recommended Request Pipeline
-
-Before a user message reaches the SLM, two lightweight checks should sit in
+Before a user message reaches the SLM,  **CSAM Filtering** should sit in
 front of it:
 
 ```
 User input
     ↓
-[Scope classifier → mortgage?]    ← cheapest, fastest, reject early
+[Scope classifier → mortgage?]    ← cheapest, fastest, reject early 
     ↓ in scope
-[Moderation API]                  ← catch harmful text (abuse, threats etc.)
+[Moderation API]                  ← catch harmful text (abuse, threats etc.). #To do
     ↓ clean
-Your SLM
+ SLM
 ```
 
 **Why this order matters:**
