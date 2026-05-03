@@ -10,6 +10,8 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from scope_classifier import CLASSIFIER_MODEL, DEFAULT_THRESHOLD, ScopeClassifier
+
 
 SYSTEM_PROMPT = (
     "You are a UK mortgage assistant. Only answer questions about UK mortgage "
@@ -21,18 +23,7 @@ DEFAULT_PROMPT = """### System:
 You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
 
 ### Instruction:
-Summarise the mortgage product and highlight the main lending terms.
-
-### Input:
-Provider: Halifax
-Mortgage name: 5 Year Fixed Remortgage
-Interest rate: 4.65%
-Maximum LTV: 75%
-Term type: Fixed
-Length: 5 years
-Booking fee: £999
-APRC: 5.80%
-Notes: Free valuation and standard legal work included.
+Where is capital of France?
 
 ### Response:
 """
@@ -62,6 +53,23 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Allow Hugging Face downloads if model files are missing locally.",
     )
+    parser.add_argument(
+        "--use-classifier",
+        action="store_true",
+        help="Gate the question through a zero-shot scope classifier before running the SLM.",
+    )
+    parser.add_argument(
+        "--classifier-model",
+        type=str,
+        default=CLASSIFIER_MODEL,
+        help="Hugging Face model ID for the zero-shot scope classifier.",
+    )
+    parser.add_argument(
+        "--classifier-threshold",
+        type=float,
+        default=DEFAULT_THRESHOLD,
+        help="Minimum in-scope score (0–1) for the classifier to pass a question through.",
+    )
     return parser.parse_args()
 
 
@@ -69,6 +77,29 @@ def read_prompt(args: argparse.Namespace) -> str:
     if args.prompt_file:
         return Path(args.prompt_file).read_text(encoding="utf-8")
     return args.prompt or DEFAULT_PROMPT
+
+
+def extract_question(prompt: str) -> str:
+    """Pull the user-facing text from a formatted prompt for classification.
+
+    Concatenates the ### Instruction: and ### Input: sections if present;
+    falls back to the full prompt text.
+    """
+    parts: list[str] = []
+    markers = [
+        ("### Instruction:", "### Input:"),
+        ("### Input:", "### Response:"),
+    ]
+    for start_marker, end_marker in markers:
+        start = prompt.find(start_marker)
+        if start == -1:
+            continue
+        start += len(start_marker)
+        end = prompt.find(end_marker, start)
+        chunk = (prompt[start:end] if end != -1 else prompt[start:]).strip()
+        if chunk:
+            parts.append(chunk)
+    return " ".join(parts) if parts else prompt.strip()
 
 
 def get_device() -> str:
@@ -85,6 +116,19 @@ def main() -> None:
     if args.system_prompt and (args.prompt or args.prompt_file):
         prompt = f"### System:\n{args.system_prompt.strip()}\n\n{prompt}"
     local_files_only = not args.allow_downloads
+
+    if args.use_classifier:
+        question = extract_question(prompt)
+        clf = ScopeClassifier(
+            model=args.classifier_model,
+            threshold=args.classifier_threshold,
+            local_files_only=local_files_only,
+        )
+        in_scope, refusal = clf.check(question)
+        if not in_scope:
+            print(refusal)
+            return
+
     device = get_device()
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir, local_files_only=local_files_only)

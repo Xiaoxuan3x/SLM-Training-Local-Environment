@@ -62,16 +62,18 @@ The runner loads this path by default:
 artifacts/exports/base-run-merged/
 ```
 
-For a custom prompt:
+`make run-model` passes `--use-classifier --allow-downloads` automatically, so
+the scope classifier gates every question before it reaches the SLM. For a
+custom prompt:
 
 ```bash
-python src/run_model.py --prompt-file prompt.txt
+python src/run_model.py --prompt "What is LTV?" --use-classifier --allow-downloads
 ```
 
 The runner uses local files only unless you pass `--allow-downloads`.
 
-Expected result: the model should produce a response to whatever prompt is
-configured in `src/run_model.py`, or to the custom prompt file you pass.
+Expected result: in-scope mortgage questions produce a model response;
+out-of-scope questions are rejected by the classifier before the SLM loads.
 
 ### Scenario B: Run From a Fresh Environment
 
@@ -110,70 +112,53 @@ pip install --upgrade pip
 pip install torch transformers sentencepiece safetensors accelerate
 ```
 
-After unpacking, the model folder should be:
+Also copy `src/scope_classifier.py` and `src/run_model.py` from this repo
+into `slm-local-run/`. The `transformers` package above satisfies their
+only dependency.
+
+After unpacking, the folder should be:
 
 ```text
-slm-local-run/base-run-merged/
+slm-local-run/
+  base-run-merged/       ← unpacked model
+  scope_classifier.py    ← copied from src/
+  run_model.py           ← copied from src/
 ```
 
 #### 3. Run a Smoke Test
 
-Run this from the fresh environment:
+Run from inside `slm-local-run/` with the venv active. The classifier gates
+every question before the SLM is loaded.
 
 ```bash
-python - <<'PY'
-from transformers import AutoModelForCausalLM, AutoTokenizer
+# in-scope — classifier passes to SLM
+python run_model.py \
+  --model-dir base-run-merged \
+  --prompt "What is LTV?" \
+  --use-classifier \
+  --allow-downloads
 
-model_dir = "base-run-merged"
-
-prompt = """### System:
-You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
-
-### Instruction:
-Summarise the mortgage product and highlight the main lending terms.
-
-### Input:
-Provider: Halifax
-Mortgage name: 5 Year Fixed Remortgage
-Interest rate: 4.65%
-Maximum LTV: 75%
-Term type: Fixed
-Length: 5 years
-Booking fee: £999
-APRC: 5.80%
-Notes: Free valuation and standard legal work included.
-
-### Response:
-"""
-
-tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
-model = AutoModelForCausalLM.from_pretrained(
-    model_dir,
-    local_files_only=True,
-    low_cpu_mem_usage=True,
-)
-model.eval()
-
-inputs = tokenizer(prompt, return_tensors="pt")
-input_length = inputs["input_ids"].shape[-1]
-outputs = model.generate(
-    **inputs,
-    max_length=input_length + 160,
-    do_sample=False,
-    repetition_penalty=1.08,
-    pad_token_id=tokenizer.eos_token_id,
-)
-
-text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-print(text[len(prompt):].strip() if text.startswith(prompt) else text)
-PY
+# out-of-scope — classifier rejects, SLM never loads
+python run_model.py \
+  --model-dir base-run-merged \
+  --prompt "Where is the capital of France?" \
+  --use-classifier \
+  --allow-downloads
 ```
 
-Expected result: the model should produce a response to the smoke-test prompt.
+`--allow-downloads` is required on first run to download the classifier model
+(~256 MB) into `~/.cache/huggingface/hub/`. Omit it on subsequent runs.
+
+Expected result: mortgage questions produce a model response; out-of-scope
+questions print the refusal message and exit without loading the SLM.
 
 ## Route 2: Convert to GGUF and Run With Ollama
 
 Use this route when you want a local Ollama model. The flow is:
+
+> **Classifier limitation:** Ollama is a standalone runtime with no Python
+> hook. `scope_classifier.py` does not run when you call `ollama run` directly,
+> so off-topic questions reach the model unfiltered.
 
 ```text
 Hugging Face merged folder -> GGUF F16 -> GGUF Q4_K_M -> Ollama model
@@ -450,15 +435,15 @@ prompt you send.
 
 ## Which Route Should You Use?
 
-| Goal | Route |
-| --- | --- |
-| Python inference | Route 1: Hugging Face |
-| Evaluation scripts | Route 1: Hugging Face |
-| Further ML work or future fine-tuning | Route 1: Hugging Face |
-| FastAPI or custom Python service | Route 1: Hugging Face |
-| Local desktop runtime | Route 2: GGUF / Ollama |
-| Smaller single-file local model | Route 2: GGUF / Ollama |
-| CPU-friendly local deployment | Route 2: GGUF / Ollama |
+| Goal | Route | Classifier works? |
+| --- | --- | --- |
+| Python inference | Route 1: Hugging Face | Yes — built in |
+| Evaluation scripts | Route 1: Hugging Face | Yes — built in |
+| Further ML work or future fine-tuning | Route 1: Hugging Face | Yes — built in |
+| FastAPI or custom Python service | Route 1: Hugging Face | Yes — built in |
+| Local desktop runtime | Route 2: GGUF / Ollama | No — not supported |
+| Smaller single-file local model | Route 2: GGUF / Ollama | No — not supported |
+| CPU-friendly local deployment | Route 2: GGUF / Ollama | No — not supported |
 
 Recommended project workflow:
 
