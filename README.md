@@ -2,42 +2,34 @@
 
 A beginner-friendly starter kit for experimenting with small language model (SLM) training on your laptop or workstation. It packages a LoRA-based fine-tuning script, a configurable YAML file, sample data, and documentation so you can iterate quickly without building the plumbing from scratch.
 
-## Repository layout
-- **Core training and inference**
-  - `src/train_slm.py` – Hugging Face/PEFT training entry point with LoRA and optional 4-bit loading.
-  - `src/compare_eval_loss.py` – Compares evaluation loss for the base model versus a saved LoRA adapter.
-  - `src/export_merged_model.py` – Merges a trained LoRA adapter into the base model and saves a standalone Hugging Face model folder.
-  - `src/run_model.py` – Loads the merged local model and runs a text-generation smoke test.
-  - `src/scope_classifier.py` – Lightweight zero-shot scope classifier (DistilBERT NLI) that rejects off-topic questions before the SLM is loaded.
+## Key Components
 
-- **Synthetic data generation**
-  - `src/data_gen/generate_dataset.py` – Main synthetic dataset generation pipeline.
-  - `src/data_gen/qa_generator.py` – Builds instruction/response style QA examples.
-  - `src/data_gen/llm_client.py` – Wraps the LLM provider calls used during generation.
-  - `src/data_gen/product_sampler.py` – Samples source product or domain inputs for generation.
-  - `src/data_gen/quality_filter.py` – Applies quality filtering to generated examples.
-  - `src/data_gen/__init__.py` – Package marker for the data generation module.
+### 1. Core Training Pipeline
+- `src/train_slm.py` – LoRA fine-tuning entry point using Hugging Face + PEFT on TinyLlama-1.1B.
+- `configs/default_training.yaml` / `configs/mps_training.yaml` – Full config control over LoRA rank, learning rate, quantisation, dataset path, and system prompt.
+- Apple Silicon MPS support: disables CUDA-only 4-bit path, auto-detects device.
 
-- **Configuration**
-  - `configs/default_training.yaml` – Central configuration for model, dataset, LoRA, and quantisation settings.
-  - `configs/data_generation.yaml` – Configuration for synthetic data generation and filtering.
+### 2. Synthetic Data Generation
+- `src/data_gen/` – Full pipeline: `generate_dataset.py`, `qa_generator.py`, `quality_filter.py`, `product_sampler.py`, `llm_client.py`.
+- `data/synthetic_mortgage_dataset.jsonl` – Teacher-LLM-generated QA pairs (knowledge distillation approach).
+- `data/uk_mortgage_dataset.jsonl` – Curated domain dataset.
 
-- **Sample and generated data**
-  - `data/sample_dataset.jsonl` – Minimal toy instruction dataset showing the expected JSONL schema.
-  - `data/uk_mortgage_dataset.jsonl` – Domain dataset used for mortgage-focused fine-tuning experiments.
-  - `data/synthetic_mortgage_dataset.jsonl` – Synthetic mortgage QA dataset produced by the generation pipeline.
+### 3. Domain Boundary Control (3-layer stack)
 
-- **Documentation**
-  - `docs/environment_setup_tutorial.md` – Step-by-step walkthrough for bringing the environment online.
-  - `docs/small_language_model_techniques.md` – Reference guide describing the SLM methodology used in this project.
-  - `docs/model_comparison_techniques.md` – Notes on comparing the fine-tuned adapter against the base model.
-  - `docs/model_export_workflow.md` – How to export a merged Hugging Face model and optionally convert it to GGUF for Ollama.
-  - `docs/synthetic_data_generation.md` – Workflow and configuration guide for synthetic dataset creation.
+| Layer | Component | Status |
+|---|---|---|
+| 1st gate | DistilBERT NLI zero-shot scope classifier (`src/scope_classifier.py`) | Done |
+| 2nd gate | System prompt in training format | Done |
+| 3rd gate | Boundary training examples (`data/boundary_examples.jsonl`, 40 examples) | Done, limited coverage |
+| Moderation API | Harmful content filter before SLM | TODO |
 
-- **Project tooling**
-  - `Makefile` – Convenience targets for install, training, evaluation, export, generation, and local smoke tests.
-  - `requirements.txt` – Python dependencies tested on Python 3.10+.
-  - `README.md` – Project overview, quick start, and usage notes.
+### 4. Evaluation
+- `src/compare_eval_loss.py` – Compares base model vs LoRA adapter on the same eval split, prints eval loss delta and perplexity.
+
+### 5. Export & Deployment
+- `src/export_merged_model.py` – Merges LoRA adapter into base model, saves standalone HF folder.
+- `src/run_model.py` – Local inference with optional scope classifier gate.
+- GGUF/Ollama conversion path documented in `docs/model_export_workflow.md`.
 
 ## Quick start
 1. **Create a virtual environment**
