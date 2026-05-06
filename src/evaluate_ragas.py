@@ -13,10 +13,10 @@ Data mapping (mortgage JSONL → RAGAS schema):
     model output → answer
 
 Metrics:
-    faithfulness       – does the answer stay within the product details? (hallucination check)
-    answer_relevancy   – does the answer address the question asked?
-    answer_correctness – accuracy vs ground truth (ROUGE + semantic)
-    answer_similarity  – semantic closeness to the reference answer
+    Faithfulness       – does the answer stay within the product details? (hallucination check)
+    AnswerRelevancy    – does the answer address the question asked?
+    FactualCorrectness – accuracy vs ground truth
+    SemanticSimilarity – semantic closeness to the reference answer
 
 Usage:
     python src/evaluate_ragas.py
@@ -36,11 +36,11 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 from ragas import EvaluationDataset, SingleTurnSample, evaluate
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
-from ragas.metrics import (
-    AnswerCorrectness,
+from ragas.metrics.collections import (
     AnswerRelevancy,
-    AnswerSimilarity,
+    FactualCorrectness,
     Faithfulness,
+    SemanticSimilarity,
 )
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -146,8 +146,8 @@ def configure_metrics(judge_model: str) -> list:
     return [
         Faithfulness(llm=llm),
         AnswerRelevancy(llm=llm, embeddings=embeddings),
-        AnswerCorrectness(llm=llm),
-        AnswerSimilarity(embeddings=embeddings),
+        FactualCorrectness(llm=llm),
+        SemanticSimilarity(embeddings=embeddings),
     ]
 
 
