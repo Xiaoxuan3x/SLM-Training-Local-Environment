@@ -32,16 +32,15 @@ import time
 from pathlib import Path
 
 import torch
-from datasets import Dataset
 from langchain_ollama import ChatOllama, OllamaEmbeddings
-from ragas import evaluate
+from ragas import EvaluationDataset, SingleTurnSample, evaluate
 from ragas.embeddings import LangchainEmbeddingsWrapper
 from ragas.llms import LangchainLLMWrapper
 from ragas.metrics import (
-    answer_correctness,
-    answer_relevancy,
-    answer_similarity,
-    faithfulness,
+    AnswerCorrectness,
+    AnswerRelevancy,
+    AnswerSimilarity,
+    Faithfulness,
 )
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -127,29 +126,29 @@ def generate_answers(
     return answers
 
 
-def build_ragas_dataset(examples: list[dict], answers: list[str]) -> Dataset:
-    return Dataset.from_list([
-        {
-            "question": ex["instruction"],
-            "contexts": [ex["input"]],  # RAGAS expects a list of strings
-            "ground_truth": ex["output"],
-            "answer": answer,
-        }
+def build_ragas_dataset(examples: list[dict], answers: list[str]) -> EvaluationDataset:
+    samples = [
+        SingleTurnSample(
+            user_input=ex["instruction"],
+            retrieved_contexts=[ex["input"]],  # product details act as the retrieved context
+            reference=ex["output"],
+            response=answer,
+        )
         for ex, answer in zip(examples, answers)
-    ])
+    ]
+    return EvaluationDataset(samples=samples)
 
 
 def configure_metrics(judge_model: str) -> list:
     llm = LangchainLLMWrapper(ChatOllama(model=judge_model))
     embeddings = LangchainEmbeddingsWrapper(OllamaEmbeddings(model=judge_model))
 
-    faithfulness.llm = llm
-    answer_relevancy.llm = llm
-    answer_relevancy.embeddings = embeddings
-    answer_correctness.llm = llm
-    answer_similarity.embeddings = embeddings
-
-    return [faithfulness, answer_relevancy, answer_correctness, answer_similarity]
+    return [
+        Faithfulness(llm=llm),
+        AnswerRelevancy(llm=llm, embeddings=embeddings),
+        AnswerCorrectness(llm=llm),
+        AnswerSimilarity(embeddings=embeddings),
+    ]
 
 
 def main() -> None:
