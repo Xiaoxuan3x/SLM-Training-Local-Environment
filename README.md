@@ -25,6 +25,7 @@ A beginner-friendly starter kit for experimenting with small language model (SLM
 
 ### 4. Evaluation
 - `src/compare_eval_loss.py` – Compares base model vs LoRA adapter on the same eval split, prints eval loss delta and perplexity.
+- `src/evaluate_ragas.py` – Runs RAGAS semantic evaluation (Faithfulness, Answer Relevancy, Factual Correctness, Semantic Similarity) using a local Ollama model as the LLM judge. No API key required.
 
 ### 5. Export & Deployment
 - `src/export_merged_model.py` – Merges LoRA adapter into base model, saves standalone HF folder.
@@ -60,13 +61,22 @@ That config disables CUDA-only 4-bit loading and mixed precision defaults that d
    ```bash
    make compare-eval-loss
    ```
-5. **Export a standalone Hugging Face model**
+5. **Run RAGAS semantic evaluation** (requires Ollama running with a judge model)
+   ```bash
+   ollama pull llama3.1        # first time only
+   make eval-ragas
+   # or with options:
+   python src/evaluate_ragas.py --max-samples 20 --judge-model mistral
+   ```
+   See `docs/evaluation_benchmark_guide.md` for a full description of all evaluation methods.
+
+6. **Export a standalone Hugging Face model**
    ```bash
    make export-merged
    ```
 The merged model folder is written to `artifacts/exports/base-run-merged/`. Move or deploy the whole folder, not only `model.safetensors`.
 
-6. **Run the exported model locally**
+7. **Run the exported model locally**
    ```bash
    make run-model
    # or
@@ -116,6 +126,7 @@ Create additional YAML files under `configs/` for different experiments and pass
 ## Usage patterns
 - **Train on your own data**: Copy your JSONL file into `data/`, update `dataset.path`, and re-run `make train`.
 - **Compare eval loss**: Run `make compare-eval-loss` after training to compare the base model against the saved LoRA adapter.
+- **Run RAGAS evaluation**: Run `make eval-ragas` (Ollama must be running) to measure Faithfulness, Answer Relevancy, Factual Correctness, and Semantic Similarity on the exported model. See `docs/evaluation_benchmark_guide.md`.
 - **Export a runnable model**: Run `make export-merged` to merge the LoRA adapter into the base model and save a standalone Hugging Face model folder.
 - **Test the exported model**: Run `make run-model`, or call `python src/run_model.py --prompt "..." --use-classifier --allow-downloads` for a custom prompt.
 - **Gate off-topic questions**: Pass `--use-classifier` to reject questions outside the UK mortgage domain before the SLM loads. See `docs/domain_boundary_guide.md`.
@@ -129,6 +140,7 @@ Create additional YAML files under `configs/` for different experiments and pass
 ## Documentation
 - **Environment tutorial**: `docs/environment_setup_tutorial.md` – extended instructions, troubleshooting notes, and cleanup steps.
 - **Technique reference**: `docs/small_language_model_techniques.md` – overview of the LoRA → domain tuning → distillation → quantisation pipeline selected for this project.
+- **Evaluation benchmark guide**: `docs/evaluation_benchmark_guide.md` – all evaluation methods in this repo: eval loss comparison, perplexity, and RAGAS semantic metrics (Faithfulness, Answer Relevancy, Factual Correctness, Semantic Similarity).
 - **Model comparison**: `docs/model_comparison_techniques.md` – first steps for comparing fine-tuned LoRA results against the original base model.
 - **Model export workflow**: `docs/model_export_workflow.md` – how to run the Hugging Face export in a fresh local environment and optionally convert it to GGUF for Ollama.
 - **Domain boundary guide**: `docs/domain_boundary_guide.md` – how the scope classifier, system prompt, and boundary training examples combine to restrict the model to the UK mortgage domain.

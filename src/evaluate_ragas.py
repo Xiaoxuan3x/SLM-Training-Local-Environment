@@ -32,10 +32,10 @@ import time
 from pathlib import Path
 
 import torch
-from langchain_ollama import ChatOllama, OllamaEmbeddings
+from openai import OpenAI
 from ragas import EvaluationDataset, SingleTurnSample, evaluate
-from ragas.embeddings import LangchainEmbeddingsWrapper
-from ragas.llms import LangchainLLMWrapper
+from ragas.embeddings import embedding_factory
+from ragas.llms import llm_factory
 from ragas.metrics.collections import (
     AnswerRelevancy,
     FactualCorrectness,
@@ -140,8 +140,9 @@ def build_ragas_dataset(examples: list[dict], answers: list[str]) -> EvaluationD
 
 
 def configure_metrics(judge_model: str) -> list:
-    llm = LangchainLLMWrapper(ChatOllama(model=judge_model))
-    embeddings = LangchainEmbeddingsWrapper(OllamaEmbeddings(model=judge_model))
+    ollama_client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+    llm = llm_factory(judge_model, client=ollama_client)
+    embeddings = embedding_factory("openai", model=judge_model, client=ollama_client)
 
     return [
         Faithfulness(llm=llm),
