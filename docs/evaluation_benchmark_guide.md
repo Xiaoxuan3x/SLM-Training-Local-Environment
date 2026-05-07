@@ -263,6 +263,3 @@ The script passes each (question, context, reference, response) tuple to the Oll
 
 **RAGAS scores** depend on the quality of the judge model. A weaker judge (e.g., a small Ollama model) may score inconsistently on ambiguous answers. Larger judge models produce more reliable scores but take longer to run.
 
-**Small eval sets** (fewer than 50 examples) make both metrics noisy. Treat results as directional signals rather than final benchmarks until you have a larger evaluation set.
-
-**Semantic Similarity** uses the same model for both generation and embedding when Ollama is the judge, which can introduce a mild bias toward the judge's own output style.
