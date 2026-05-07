@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV ?= .venv
 ACTIVATE = . $(VENV)/bin/activate
 
-.PHONY: install train compare-eval-loss export-merged run-model clean
+.PHONY: install train compare-eval-loss export-merged run-model eval-ragas clean
 
 install:
 	$(PYTHON) -m venv $(VENV)
@@ -20,6 +20,9 @@ export-merged:
 
 run-model:
 	$(ACTIVATE) && python src/run_model.py --max-new-tokens 800 --use-classifier --allow-downloads
+
+eval-ragas:
+	$(ACTIVATE) && python src/evaluate_ragas.py --max-samples 50
 
 clean:
 	rm -rf $(VENV) artifacts
