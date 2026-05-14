@@ -14,7 +14,7 @@ boundary_data:
   ratio: 0.2
 
 dataset:
-  path: data/synthetic_mortgage_dataset.jsonl
+  path: data/train_dataset.jsonl
   field_names:
     instruction: instruction
     input: input

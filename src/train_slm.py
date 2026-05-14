@@ -241,7 +241,7 @@ def train(cfg: Config):
         bf16=bf16,
         gradient_checkpointing=cfg.training.get("gradient_checkpointing", False),
         dataloader_pin_memory=device.type == "cuda",
-        report_to=[],
+        report_to=["tensorboard"],
     )
 
     trainer = Trainer(

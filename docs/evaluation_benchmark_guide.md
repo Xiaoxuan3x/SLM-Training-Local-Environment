@@ -6,6 +6,27 @@ This guide covers all evaluation methods available in this repo. Two complementa
 
 Eval loss tells you whether the model learned the training distribution. RAGAS tells you whether the model's answers are faithful, relevant, and accurate in the way a user would care about. Neither method alone is sufficient. Eval loss can improve while answer quality degrades (overfitting to format), and RAGAS scores can look reasonable even when training was inefficient. Running both gives a more complete picture.
 
+Both methods support a **held-out test set** (`data/test_dataset.jsonl`) that is never loaded during training. Use `make eval-ragas-test` for a final unbiased score when a model is a release candidate. See [Held-Out Test Set](#held-out-test-set) below.
+
+---
+
+## Held-Out Test Set
+
+**Script:** `src/create_test_split.py`
+**Makefile target:** `make create-test-split`
+
+Run this once before the first training run. It splits `data/synthetic_mortgage_dataset.jsonl` into `data/train_dataset.jsonl` (90%) and `data/test_dataset.jsonl` (10%) using a fixed seed that differs from the training seed. The training config points at `train_dataset.jsonl`; the test file is never loaded during training.
+
+```bash
+make create-test-split
+```
+
+Use the held-out test set only when evaluating a release candidate — not during iterative development. Each time you check scores against the test set and adjust the model in response, the test set gradually loses its neutrality.
+
+```bash
+make eval-ragas-test    # RAGAS evaluation on data/test_dataset.jsonl
+```
+
 ---
 
 ## Method 1: Eval Loss and Perplexity
@@ -39,6 +60,13 @@ Equivalent command:
 
 ```bash
 python src/compare_eval_loss.py --config configs/default_training.yaml
+```
+
+Training also writes TensorBoard logs to `artifacts/experiments/` automatically. To view training and eval loss curves across all runs:
+
+```bash
+tensorboard --logdir artifacts/experiments/
+# then open http://localhost:6006
 ```
 
 The script loads both the base model and the LoRA adapter, evaluates each on the same deterministic 90/10 eval split used during training, and prints:
@@ -230,19 +258,25 @@ The script passes each (question, context, reference, response) tuple to the Oll
 | Situation | Recommended method |
 |---|---|
 | After every training run, quick sanity check | Eval loss (`make compare-eval-loss`) |
-| Before declaring a model ready for testing | Both methods |
+| Tracking loss curves across multiple experiments | TensorBoard (`tensorboard --logdir artifacts/experiments/`) |
+| Before declaring a model ready for testing | Eval loss + `make eval-ragas` |
+| Final unbiased score before release | `make eval-ragas-test` (held-out test set) |
 | Investigating hallucination behaviour | RAGAS Faithfulness |
 | Checking whether answers address the right question | RAGAS Answer Relevancy |
 | Comparing two fine-tuned checkpoints for answer quality | RAGAS all metrics |
 | Running on CPU without Ollama available | Eval loss only |
-| Tracking improvement over multiple training experiments | Both, log results to `artifacts/` |
 
 ---
 
 ## Suggested workflow
 
 ```
-1. Train with make train
+# Once, before the first training run:
+0. Run make create-test-split
+
+# Every experiment cycle:
+1. Run make train
+   → View loss curves at http://localhost:6006 (tensorboard --logdir artifacts/experiments/)
 2. Run make compare-eval-loss
    → If delta is positive (adapter made things worse), revisit training config
    → If delta is negative or neutral, continue
@@ -253,13 +287,17 @@ The script passes each (question, context, reference, response) tuple to the Oll
    → Review Factual Correctness and Semantic Similarity for overall quality
 5. Adjust data, config, or training length based on weakest metric
 6. Repeat from step 1
+
+# Only when the model is a release candidate:
+7. Run make eval-ragas-test
+   → This is the unbiased final score; do not use it to guide further tuning
 ```
 
 ---
 
 ## Limitations
 
-**Eval loss** is measured on the same dataset used for training (different split, but same distribution). It does not generalise to unseen question types or adversarial inputs.
+**Eval loss** is measured on the same dataset used for training (different split, but same distribution). It does not generalise to unseen question types or adversarial inputs. Use `make eval-ragas-test` on the held-out test set for a distribution-independent measure.
 
 **RAGAS scores** depend on the quality of the judge model. A weaker judge (e.g., a small Ollama model) may score inconsistently on ambiguous answers. Larger judge models produce more reliable scores but take longer to run.
 
