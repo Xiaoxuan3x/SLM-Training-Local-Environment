@@ -19,14 +19,7 @@ SYSTEM_PROMPT = (
     "For any other question, respond that the question is outside your knowledge scope."
 )
 
-DEFAULT_PROMPT = """### System:
-You are a UK mortgage assistant. Only answer questions about UK mortgage products, interest rates, LTV, fees, eligibility, and related topics. For any other question, respond that the question is outside your knowledge scope.
-
-### Instruction:
-Where is capital of France?
-
-### Response:
-"""
+DEFAULT_USER_MESSAGE = "Where is the capital of France?"
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,33 +66,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_prompt(args: argparse.Namespace) -> str:
+def read_user_message(args: argparse.Namespace) -> str:
     if args.prompt_file:
         return Path(args.prompt_file).read_text(encoding="utf-8")
-    return args.prompt or DEFAULT_PROMPT
-
-
-def extract_question(prompt: str) -> str:
-    """Pull the user-facing text from a formatted prompt for classification.
-
-    Concatenates the ### Instruction: and ### Input: sections if present;
-    falls back to the full prompt text.
-    """
-    parts: list[str] = []
-    markers = [
-        ("### Instruction:", "### Input:"),
-        ("### Input:", "### Response:"),
-    ]
-    for start_marker, end_marker in markers:
-        start = prompt.find(start_marker)
-        if start == -1:
-            continue
-        start += len(start_marker)
-        end = prompt.find(end_marker, start)
-        chunk = (prompt[start:end] if end != -1 else prompt[start:]).strip()
-        if chunk:
-            parts.append(chunk)
-    return " ".join(parts) if parts else prompt.strip()
+    return args.prompt or DEFAULT_USER_MESSAGE
 
 
 def get_device() -> str:
@@ -112,19 +82,16 @@ def get_device() -> str:
 
 def main() -> None:
     args = parse_args()
-    prompt = read_prompt(args)
-    if args.system_prompt and (args.prompt or args.prompt_file):
-        prompt = f"### System:\n{args.system_prompt.strip()}\n\n{prompt}"
+    user_message = read_user_message(args)
     local_files_only = not args.allow_downloads
 
     if args.use_classifier:
-        question = extract_question(prompt)
         clf = ScopeClassifier(
             model=args.classifier_model,
             threshold=args.classifier_threshold,
             local_files_only=local_files_only,
         )
-        in_scope, refusal = clf.check(question)
+        in_scope, refusal = clf.check(user_message)
         if not in_scope:
             print(refusal)
             return
@@ -134,6 +101,12 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir, local_files_only=local_files_only)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+
+    messages = []
+    if args.system_prompt:
+        messages.append({"role": "system", "content": args.system_prompt.strip()})
+    messages.append({"role": "user", "content": user_message})
+    prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
     model = AutoModelForCausalLM.from_pretrained(
         args.model_dir,
@@ -170,8 +143,8 @@ def main() -> None:
         new_token_count >= args.max_new_tokens and generated_ids[-1].item() != tokenizer.eos_token_id
     )
 
-    text = tokenizer.decode(generated_ids, skip_special_tokens=True)
-    completion = text[len(prompt) :].strip() if text.startswith(prompt) else text.strip()
+    new_token_ids = generated_ids[inputs["input_ids"].shape[-1]:]
+    completion = tokenizer.decode(new_token_ids, skip_special_tokens=True).strip()
     print(completion)
     print(f"\n[timing] {elapsed:.2f}s | {new_token_count} tokens | {new_token_count / elapsed:.1f} tok/s", file=sys.stderr)
     if stopped_by_max_tokens:

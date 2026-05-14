@@ -90,13 +90,15 @@ def load_examples(path: str, max_samples: int) -> list[dict]:
     return rows
 
 
-def build_prompt(instruction: str, input_text: str) -> str:
-    return (
-        f"### System:\n{SYSTEM_PROMPT}\n\n"
-        f"### Instruction:\n{instruction}\n\n"
-        f"### Input:\n{input_text}\n\n"
-        f"### Response:\n"
-    )
+def build_prompt(instruction: str, input_text: str, tokenizer: AutoTokenizer) -> str:
+    user_content = instruction
+    if input_text:
+        user_content += "\n\n" + input_text
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
 def generate_answers(
@@ -108,7 +110,7 @@ def generate_answers(
 ) -> list[str]:
     answers: list[str] = []
     for i, ex in enumerate(examples, 1):
-        prompt = build_prompt(ex["instruction"], ex["input"])
+        prompt = build_prompt(ex["instruction"], ex["input"], tokenizer)
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512).to(device)
         with torch.inference_mode():
             out = model.generate(
@@ -119,8 +121,8 @@ def generate_answers(
                 pad_token_id=tokenizer.eos_token_id,
                 eos_token_id=tokenizer.eos_token_id,
             )
-        text = tokenizer.decode(out[0], skip_special_tokens=True)
-        completion = text[len(prompt):].strip() if text.startswith(prompt) else text.strip()
+        new_token_ids = out[0][inputs["input_ids"].shape[-1]:]
+        completion = tokenizer.decode(new_token_ids, skip_special_tokens=True).strip()
         answers.append(completion)
         print(f"  [{i}/{len(examples)}] {len(completion.split())} words", file=sys.stderr)
     return answers
