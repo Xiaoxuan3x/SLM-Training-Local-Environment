@@ -25,7 +25,7 @@ GCP solves each of these problems with purpose-built managed services. The table
 | Training blocked by laptop hardware | Vertex AI Custom Training (T4/L4 GPU, spot pricing) |
 | Data and artifacts lost on machine wipe | Cloud Storage (versioned, lifecycle-managed) |
 | No experiment history across runs | Vertex AI TensorBoard + BigQuery metrics table |
-| RAGAS evaluation requires local Ollama | Vertex AI Model Garden (managed LLM endpoint) |
+| RAGAS evaluation requires local Ollama | Vertex AI Gemini API (pay-per-token judge; no endpoint to manage) |
 | Inference requires developer's machine | Cloud Run (serverless, always-on) |
 | API keys in plaintext `.env` | Secret Manager (IAM-scoped, audit-logged) |
 | Manual `make train` workflow | Vertex AI Pipelines (automated DAG) |
@@ -37,9 +37,11 @@ GCP solves each of these problems with purpose-built managed services. The table
 Before diving into the phases, here's what each service actually is. Read this section once — it will make every later decision obvious.
 
 ### Secret Manager
-**What it is:** A vault for sensitive strings (API keys, passwords, tokens). You store a secret once; your code fetches it by name at runtime with proper authentication. Nothing sensitive ever touches a config file or environment variable in plaintext.
+**What it is:** A vault for sensitive strings (API keys, passwords, tokens). You store a secret once; your code fetches it by name at runtime with proper authentication. Nothing sensitive ever touches a config file or plaintext `.env` file.
 
 **Why it matters here:** The data-generation pipeline calls Anthropic and Groq APIs. Right now those keys live in `.env`, which is one accidental `git add` away from being public. Secret Manager removes that risk entirely and logs every time a key is accessed.
+
+**A note on Cloud Run integration:** Cloud Run's native Secret Manager binding mounts secrets as environment variables or files inside the container at startup — that's still audit-logged and IAM-controlled, and far safer than `.env` files. Keys don't live in your source code or image; they just arrive as env vars at runtime rather than being fetched by your application code directly.
 
 **Mental model:** Think of it as a locked safe with a receptionist. Your code says "give me `ANTHROPIC_API_KEY`" — the receptionist checks your identity (IAM role), then hands over the value. You never see where the safe is.
 
@@ -119,7 +121,11 @@ Before diving into the phases, here's what each service actually is. Read this s
 ### Vertex AI Model Garden
 **What it is:** A catalogue of pre-trained, open-weight models (Llama 3, Gemma, Mistral, etc.) that GCP hosts and serves via a managed API endpoint. You pick a model, deploy it to an endpoint, and call it via an OpenAI-compatible REST API.
 
-**Why it matters here:** RAGAS evaluation uses a large LLM as a "judge" to score answers for faithfulness and relevancy. Right now that judge is Ollama running locally, which requires a model pulled to your machine and Ollama to be running. Vertex AI Model Garden replaces this with a managed endpoint — the RAGAS script just swaps its `base_url` from `localhost:11434` to a GCP endpoint URL.
+**Cost caveat:** A dedicated Model Garden endpoint for an 8B model doesn't scale to zero. Even at idle it runs roughly **$1–3/hr**. For a RAGAS judge that only runs during evaluation, that idle cost can easily exceed the training job cost itself.
+
+**Better option for occasional evals — Vertex Gemini API:** Calling `gemini-1.5-flash` or `gemini-2.0-flash` via the Vertex AI generative language API is pay-per-token with no endpoint to provision or keep warm. RAGAS supports it natively via its `LangchainLLMWrapper`. For infrequent evaluation runs this is almost always cheaper and simpler than a dedicated open-weight endpoint.
+
+Model Garden endpoints make sense when you need a specific open-weight model in production or have strict data-residency requirements — not for a per-run judge.
 
 **Mental model:** Like having access to a powerful LLM via API without managing the server. The same abstraction as OpenAI's API, but the model runs inside your GCP project.
 
@@ -172,7 +178,7 @@ Before diving into the phases, here's what each service actually is. Read this s
 | Training compute | Laptop CPU/MPS | Vertex AI Custom Training | Any GPU type; spot pricing; no VM management |
 | Container image registry | Local Docker | Artifact Registry | Private; fast pulls within GCP; integrated with Cloud Build |
 | Experiment tracking | Local TensorBoard | Vertex AI TensorBoard | Persistent across runs; accessible to the whole team |
-| RAGAS LLM judge | Ollama localhost | Vertex AI Model Garden | Managed endpoint; OpenAI-compatible API; no local model required |
+| RAGAS LLM judge | Ollama localhost | Vertex AI Gemini API | Pay-per-token; no endpoint to manage; scales to zero; RAGAS supports it natively |
 | Metric history & quality gates | `ragas_results.json` | BigQuery | SQL queries across all runs; quality-gate thresholds as SQL WHERE clauses |
 | Pipeline orchestration | Manual Makefile | Vertex AI Pipelines | Automated DAG with conditional branching, retries, and lineage |
 | Model versioning | Local `artifacts/exports/` | Vertex AI Model Registry | Lineage from training job → evaluation scores → deployment |
@@ -203,8 +209,8 @@ flowchart TB
     end
 
     subgraph Eval["Evaluation"]
-        EVT["Eventarc\nGCS finalize → trigger"]
-        MG["Vertex AI Model Garden\nLlama 3 / Gemma — RAGAS judge"]
+        EVT["Eventarc\nGCS finalize → trigger\n(stepping stone; retired in Phase 6)"]
+        MG["Vertex Gemini API\ngemini-2.0-flash — RAGAS judge\n(pay-per-token; no idle cost)"]
     end
 
     subgraph Serve["Registry & Serving"]
@@ -258,7 +264,7 @@ The six phases are ordered so that each phase makes the next one possible. You c
 | 1 | Storage + secrets baseline | GCS, Secret Manager | 2–4 h | **Start here** |
 | 2 | GPU training | Vertex AI Custom Training, Artifact Registry, TensorBoard | 1–2 d | High |
 | 3 | Scalable data generation | Cloud Run Jobs, BigQuery | 1–2 d | High |
-| 4 | Automated evaluation | Vertex AI Model Garden, BigQuery, Eventarc | 1 d | Medium |
+| 4 | Automated evaluation | Vertex Gemini API, BigQuery, Eventarc | 1 d | Medium |
 | 5 | Model serving endpoint | Cloud Run, Vertex AI Model Registry | 2–3 d | Medium |
 | 6 | Full MLOps pipeline | Vertex AI Pipelines, Cloud Build | 3–5 d | Low (future) |
 
@@ -314,9 +320,14 @@ The six phases are ordered so that each phase makes the next one possible. You c
 **Goal:** Make evaluation happen automatically whenever new adapter weights land in GCS, using a managed LLM judge instead of local Ollama.
 
 **What you'll set up:**
-- **Vertex AI Model Garden:** Deploy Llama 3 8B or Gemma 3 9B to a managed endpoint. The endpoint exposes an OpenAI-compatible API — swap the `base_url` in `evaluate_ragas.py` from `http://localhost:11434/v1` to the Vertex endpoint URL. Nothing else changes.
+- **Vertex AI Gemini API (judge):** Replace the Ollama `base_url` in `evaluate_ragas.py` with a call to `gemini-2.0-flash` via RAGAS's `LangchainLLMWrapper`. No endpoint to deploy or keep warm — you pay per token only when evaluation runs. This is almost always cheaper for occasional evals than a dedicated Model Garden endpoint, which costs $1–3/hr at idle even when no jobs are running.
+
+  > **When to reconsider Model Garden:** If you need a specific open-weight model for compliance or data-residency reasons, a dedicated endpoint makes sense — but size it down to Gemma 2B rather than 8B to control idle cost.
+
 - **BigQuery:** Write RAGAS scores and perplexity delta into `slm_datasets.experiment_metrics` at the end of every evaluation run, keyed by `run_id`. This makes the quality gate in Phase 6 a simple SQL query.
-- **Eventarc:** Create a trigger on `gs://slm-artifacts/adapters/` for the `google.cloud.storage.object.v1.finalized` event. When the training job writes adapter weights, Eventarc automatically fires a Cloud Run container (or a Vertex Pipeline step) that runs evaluation — no `make eval-ragas` required.
+- **Eventarc:** Create a trigger on `gs://slm-artifacts/adapters/` for the `google.cloud.storage.object.v1.finalized` event. When the training job writes adapter weights, Eventarc automatically fires a Cloud Run container that runs evaluation — no `make eval-ragas` required.
+
+  > **Note — stepping stone only:** This Eventarc trigger will be superseded in Phase 6. Once Vertex AI Pipelines is wiring the full DAG, evaluation is just the step that follows training — the external trigger becomes redundant (and could cause double evaluations if both fire). Keep the trigger active only until Phase 6 is deployed, then disable it.
 
 **Files to change:** `src/evaluate_ragas.py` (Vertex endpoint URL, BigQuery write), `src/compare_eval_loss.py` (BigQuery write), `requirements.txt` (add `google-cloud-bigquery`).
 
@@ -334,14 +345,21 @@ The six phases are ordered so that each phase makes the next one possible. You c
 
 **Serving options compared:**
 
-| Option | Best for | Cold start | Cost at zero traffic |
+| Option | Best for | Cold start (container + weights) | Cost at zero traffic |
 |---|---|---|---|
-| Cloud Run CPU | Demo / low traffic | 8–15 s | $0 |
-| Cloud Run GPU | Moderate traffic | 20–30 s | $0 |
+| Cloud Run CPU (min-instances=0) | Demo / bursty traffic | 30–90 s total¹ | $0 |
+| Cloud Run CPU (min-instances=1) | Low-latency demos | ~0 s | ~$15–25/mo |
+| Cloud Run GPU | Moderate traffic | 60–120 s total | $0 |
 | Vertex AI Online Prediction | Production A/B | 30–60 s | $0 |
 | GKE + vLLM | High throughput | None | $200+/mo |
 
-**Recommendation:** Cloud Run CPU. TinyLlama-1.1B fits in 16 GB RAM and takes ~2–5 s per request on 8 vCPUs. At zero traffic, it costs nothing.
+¹ The 8–15 s estimate is container startup only. Loading TinyLlama-1.1B weights from GCS into CPU RAM adds 20–60 s on a cold instance depending on memory bandwidth. Total cold-start latency is closer to 30–90 s.
+
+**Recommendation — pick one, not both:**
+- **Demo / cost-sensitive:** `min-instances=0`. Accept the cold-start penalty; your first request after idle will be slow.
+- **Low-latency required:** `min-instances=1`. Eliminates cold starts entirely for ~$15–25/mo but breaks the "costs $0 at idle" property. Budget accordingly.
+
+Loading weights at startup from GCS is the dominant latency source. If cold starts are unacceptable, `min-instances=1` is the right lever — not a faster machine type.
 
 **Files to change:** `inference/server.py` + `inference/Dockerfile` (new), `src/run_model.py` (accept `MODEL_URI` env var pointing at GCS artifact path).
 
