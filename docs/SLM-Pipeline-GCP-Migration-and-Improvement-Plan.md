@@ -1,190 +1,177 @@
-# SLM Pipeline — GCP Migration Plan
+# SLM Pipeline — GCP Migration and Improvement Plan
 
-Migrates a single-machine LoRA fine-tuning workflow to a managed, scalable GCP stack. Six phased milestones from storage baseline to full MLOps automation.
-
----
-
-## Why move to GCP at all?
-
-Right now the pipeline runs entirely on your laptop. That's fine for learning, but it creates real problems as you go further:
-
-- Training blocks your machine for hours (or fails because you don't have a GPU).
-- A disk wipe, a new machine, or a teammate joining means starting over from scratch.
-- There's no record of what hyperparameters produced what results.
-- Evaluation requires Ollama running locally with a specific model pulled.
-- Inference only works when your laptop is open and your Python env is active.
-
-GCP solves each of these problems with purpose-built managed services. The table below maps every pain point to its fix, and the rest of the document explains *what each service is* and *why it's the right tool*.
+This document describes the migration of a single-machine LoRA fine-tuning workflow to a managed, scalable GCP stack. The migration is structured as six sequential phases, each independently deployable, progressing from storage and secret management through full MLOps pipeline orchestration.
 
 ---
 
-## Pain Points → Solutions
+## Motivation
 
-| Pain Point | GCP Fix |
+The baseline pipeline runs entirely on a local machine, which introduces several operational limitations:
+
+- Training blocks the developer machine for hours and cannot leverage GPU hardware without dedicated hardware ownership.
+- Data, model artifacts, and experiment configurations are tied to a single disk, with no portability across machines or team members.
+- Hyperparameter-to-result mappings are not tracked across runs in a queryable store.
+- RAGAS evaluation depends on a locally running Ollama instance with a specific model pulled.
+- Inference is only available when the developer machine is active and the local Python environment is configured.
+
+Each limitation is addressed by a purpose-built GCP managed service, detailed in the sections below.
+
+---
+
+## Pain Points and GCP Mitigations
+
+| Pain Point | GCP Service |
 |---|---|
-| Training blocked by laptop hardware | Vertex AI Custom Training (T4/L4 GPU, spot pricing) |
+| Training blocked by local hardware constraints | Vertex AI Custom Training (T4/L4 GPU, spot pricing) |
 | Data and artifacts lost on machine wipe | Cloud Storage (versioned, lifecycle-managed) |
-| No experiment history across runs | Vertex AI TensorBoard + BigQuery metrics table |
-| RAGAS evaluation requires local Ollama | Vertex AI Gemini API (pay-per-token judge; no endpoint to manage) |
-| Inference requires developer's machine | Cloud Run (serverless, always-on) |
-| API keys in plaintext `.env` | Secret Manager (IAM-scoped, audit-logged) |
+| No queryable experiment history across runs | Vertex AI TensorBoard + BigQuery metrics table |
+| RAGAS evaluation requires local Ollama instance | Vertex AI Gemini API (pay-per-token judge; no endpoint management) |
+| Inference requires developer's machine | Cloud Run (serverless, autoscaled) |
+| API keys stored in plaintext `.env` | Secret Manager (IAM-scoped, audit-logged) |
 | Manual `make train` workflow | Vertex AI Pipelines (automated DAG) |
 
 ---
 
-## GCP Service Glossary
-
-Before diving into the phases, here's what each service actually is. Read this section once — it will make every later decision obvious.
+## GCP Service Reference
 
 ### Secret Manager
-**What it is:** A vault for sensitive strings (API keys, passwords, tokens). You store a secret once; your code fetches it by name at runtime with proper authentication. Nothing sensitive ever touches a config file or plaintext `.env` file.
 
-**Why it matters here:** The data-generation pipeline calls Anthropic and Groq APIs. Right now those keys live in `.env`, which is one accidental `git add` away from being public. Secret Manager removes that risk entirely and logs every time a key is accessed.
+**Description:** A managed vault for sensitive string values (API keys, passwords, tokens). Secrets are stored once and fetched by name at runtime via IAM-authenticated API calls. Every access is audit-logged.
 
-**A note on Cloud Run integration:** Cloud Run's native Secret Manager binding mounts secrets as environment variables or files inside the container at startup — that's still audit-logged and IAM-controlled, and far safer than `.env` files. Keys don't live in your source code or image; they just arrive as env vars at runtime rather than being fetched by your application code directly.
+**Relevance:** The data-generation pipeline authenticates against the Anthropic and Groq APIs. Storing these credentials in `.env` files creates accidental-exposure risk on `git add`. Secret Manager eliminates that risk and provides per-access audit trails.
 
-**Mental model:** Think of it as a locked safe with a receptionist. Your code says "give me `ANTHROPIC_API_KEY`" — the receptionist checks your identity (IAM role), then hands over the value. You never see where the safe is.
+**Cloud Run integration note:** Cloud Run's native Secret Manager binding can mount secrets as environment variables or files at container startup. This is IAM-controlled and audit-logged; credentials are never baked into the container image or source code.
 
 ---
 
 ### Cloud Storage (GCS)
-**What it is:** Object storage — the GCP equivalent of Amazon S3. You upload files (data, checkpoints, configs, model weights) to named *buckets*, and any GCP service can read or write them using a `gs://bucket-name/path` URI.
 
-**Why it matters here:** HuggingFace Trainer already understands `gs://` paths natively via `gcsfs`. That means you can point `output_dir` at a GCS bucket and your training checkpoints are automatically cloud-stored with zero architectural change.
+**Description:** Managed object storage with a `gs://bucket-name/path` URI scheme. Analogous to Amazon S3. Supports versioning, lifecycle policies, and fine-grained IAM access control.
 
-**Mental model:** Like a shared hard drive in the cloud. Any machine — your laptop, a training VM, a Cloud Run container — can read and write the same files. No more "it's on my machine" problems.
+**Relevance:** The HuggingFace `Trainer` class resolves `gs://` output paths natively via `gcsfs`, meaning training checkpoints can be written to GCS without code changes. Any GCP service — training VMs, Cloud Run containers, local workstations — can read and write from the same bucket using consistent paths.
 
 ---
 
 ### Artifact Registry
-**What it is:** A private Docker image registry hosted on GCP. You push container images (the "packaged environment" for your training or inference code) here, and other GCP services pull from it.
 
-**Why it matters here:** Vertex AI Custom Training runs your code inside a Docker container. Artifact Registry is where that container lives. It's version-controlled (each `git push` can rebuild and push a new image tagged with the commit SHA), which means you can always reproduce exactly what ran in a given training job.
+**Description:** A private, managed Docker image registry hosted within GCP. Supports multiple artifact formats (container images, language packages). Integrates with IAM for access control and with Cloud Build for automated image publishing.
 
-**Mental model:** Like Docker Hub, but private, faster within GCP's network, and integrated with IAM permissions.
+**Relevance:** Vertex AI Custom Training requires a container image. Artifact Registry stores versioned training and inference images, tagged with commit SHAs, ensuring full reproducibility of any training job.
 
 ---
 
 ### Vertex AI Custom Training
-**What it is:** A managed service that runs a Docker container on GCP-hosted hardware — including NVIDIA T4, L4, and A100 GPUs. You specify the container image, machine type, and any environment variables; GCP spins up the VM, runs your job, and shuts it down when it finishes. You only pay for the time the VM is running.
 
-**Why it matters here:** This replaces `python src/train_slm.py` running on your laptop. You get GPU hardware without owning hardware, and training no longer blocks your machine.
+**Description:** A managed service that executes a Docker container on GCP-hosted hardware (NVIDIA T4, L4, A100). The caller specifies the container image, machine type, and environment variables; GCP provisions the VM, runs the job, and terminates the instance on completion. Billing is per-second of VM runtime.
 
-**Spot pricing:** GCP can preempt spot VMs to reclaim capacity, but because checkpoints land in GCS every N steps, an interrupted job can resume from the latest checkpoint automatically.
+**Relevance:** Replaces `python src/train_slm.py` running on a local CPU/MPS device. Provides GPU hardware without hardware ownership and decouples training from the developer workstation.
 
-**GPU options:**
+**Spot VM behavior:** Spot instances may be preempted by GCP to reclaim capacity. With checkpoint saving configured (`save_steps: 100`) to a GCS output directory, an interrupted job resumes from the latest checkpoint automatically on the next submission.
 
-| GPU | On-demand/hr | Spot/hr | Est. run cost |
+**GPU pricing reference:**
+
+| GPU | On-demand / hr | Spot / hr | Estimated job cost |
 |---|---|---|---|
 | T4 (8 vCPU, 30 GB) | $0.35 | $0.11 | ~$0.05–$0.10 |
 | L4 (8 vCPU, 30 GB) | $0.70 | $0.22 | ~$0.10–$0.20 |
-| A100 40GB | $2.93 | $0.88 | ~$0.40–$0.80 |
+| A100 40 GB | $2.93 | $0.88 | ~$0.40–$0.80 |
 
 ---
 
 ### Vertex AI TensorBoard
-**What it is:** A managed, persistent version of the TensorBoard you already use locally. Training jobs write loss curves and metrics to a GCS log directory; Vertex AI TensorBoard renders them in a web UI that persists across runs and is accessible to anyone on the team.
 
-**Why it matters here:** Right now TensorBoard only works while `tensorboard --logdir artifacts/experiments/` is running on your machine. The managed version means metrics from every training run — including ones you kicked off from a GCP VM — are always available in one place.
+**Description:** A managed, persistent TensorBoard instance. Training jobs write metric logs to a GCS log directory; Vertex AI TensorBoard renders loss curves and scalar metrics in a web UI that persists across runs and is accessible to all project members.
 
-**Mental model:** Your local TensorBoard is like a sticky note. Vertex AI TensorBoard is like a shared notebook that never gets thrown away.
+**Relevance:** The local TensorBoard workflow (`tensorboard --logdir artifacts/experiments/`) requires the developer machine to be active and is ephemeral. The managed instance retains all historical run data and serves it without any local process running.
 
 ---
 
 ### Cloud Run Jobs
-**What it is:** A serverless compute platform for running containerised *batch* workloads. A "job" is a container that runs to completion, then stops. You pay only for the CPU/memory used during execution. Cloud Run Jobs supports running multiple identical containers in parallel (called "tasks").
 
-**Why it matters here:** Data generation (`generate_dataset.py`) is a batch process — it runs once, produces output files, and exits. There's no need to keep a server running. Cloud Run Jobs lets you run 10 shards of data generation in parallel, each writing to a different GCS path, drastically reducing the time to generate a large dataset.
+**Description:** A serverless compute platform for containerized batch workloads. Each job execution runs a container to completion and stops; there is no persistent server. Cloud Run Jobs supports parallel task execution via configurable task replicas.
 
-**Mental model:** Like `make -j10` on a serverless cloud. Each "shard" is an independent worker that picks up a slice of the work.
+**Relevance:** Data generation (`generate_dataset.py`) is a stateless batch process. Running it as a Cloud Run Job with 10 parallel task replicas — each writing to a distinct GCS shard path — reduces dataset generation time proportionally without requiring persistent cluster infrastructure.
 
 ---
 
 ### BigQuery
-**What it is:** A serverless, columnar data warehouse designed for large-scale analytical queries. You can query terabytes of data in seconds using standard SQL. Unlike a traditional database, there are no servers to manage and no indexes to maintain.
 
-**Why it matters here:** Right now RAGAS scores are written to `artifacts/ragas_results.json`. That's fine for a single run, but you can't answer "did faithfulness improve after I increased LoRA rank from 8 to 16?" without opening multiple JSON files and comparing manually. BigQuery turns every evaluation run into a row you can query across runs, experiments, and model versions.
+**Description:** A serverless, columnar data warehouse optimized for large-scale analytical queries over structured data. Supports standard SQL, automatic deduplication, and streaming inserts. No servers or indexes to manage.
 
-**Mental model:** Think of it as a giant spreadsheet in the cloud that you query with SQL. Every training run appends a row; you can slice and filter across all runs at once.
+**Relevance:** RAGAS scores currently write to `artifacts/ragas_results.json`. This format does not support cross-run queries (e.g., "did faithfulness improve when LoRA rank increased from 8 to 16?"). Appending each evaluation result as a row in BigQuery enables SQL-based regression detection and quality-gate threshold checks across all historical runs.
 
 ---
 
 ### Eventarc
-**What it is:** GCP's event routing service. It listens for events from GCP services (like "a file was written to GCS") and triggers a target (like a Cloud Run container or a Vertex AI Pipeline). It's the glue that makes the pipeline event-driven instead of requiring manual triggers.
 
-**Why it matters here:** Without Eventarc, you have to run `make eval-ragas` manually after every training job. With Eventarc, writing adapter weights to a GCS bucket automatically kicks off the evaluation pipeline — no human in the loop required.
+**Description:** GCP's event routing service. Routes events emitted by GCP services (e.g., `google.cloud.storage.object.v1.finalized`) to configured targets such as Cloud Run services or Vertex AI Pipelines runs.
 
-**Mental model:** Like a webhook, but for GCP-internal events. "When X happens in GCS, do Y."
+**Relevance:** Without an event-driven trigger, `make eval-ragas` must be invoked manually after each training job. An Eventarc trigger on the adapter weights GCS prefix fires evaluation automatically when the training job writes its output, removing the manual step.
 
 ---
 
 ### Vertex AI Model Garden
-**What it is:** A catalogue of pre-trained, open-weight models (Llama 3, Gemma, Mistral, etc.) that GCP hosts and serves via a managed API endpoint. You pick a model, deploy it to an endpoint, and call it via an OpenAI-compatible REST API.
 
-**Cost caveat:** A dedicated Model Garden endpoint for an 8B model doesn't scale to zero. Even at idle it runs roughly **$1–3/hr**. For a RAGAS judge that only runs during evaluation, that idle cost can easily exceed the training job cost itself.
+**Description:** A catalog of pre-trained, open-weight models (Llama 3, Gemma, Mistral, and others) served via managed API endpoints with an OpenAI-compatible REST interface.
 
-**Better option for occasional evals — Vertex Gemini API:** Calling `gemini-1.5-flash` or `gemini-2.0-flash` via the Vertex AI generative language API is pay-per-token with no endpoint to provision or keep warm. RAGAS supports it natively via its `LangchainLLMWrapper`. For infrequent evaluation runs this is almost always cheaper and simpler than a dedicated open-weight endpoint.
+**Cost consideration:** A dedicated Model Garden endpoint for an 8B-class model does not scale to zero. Idle cost is approximately **$1–3/hr**, which can exceed total training job cost for workloads with infrequent evaluation runs.
 
-Model Garden endpoints make sense when you need a specific open-weight model in production or have strict data-residency requirements — not for a per-run judge.
+**Recommended alternative for periodic evaluation — Vertex Gemini API:** Calling `gemini-1.5-flash` or `gemini-2.0-flash` via the Vertex AI generative language API is billed per token with no endpoint to provision or maintain. RAGAS supports it natively via `LangchainLLMWrapper`. For per-run evaluation judges, this is almost always lower cost and operationally simpler than a dedicated open-weight endpoint.
 
-**Mental model:** Like having access to a powerful LLM via API without managing the server. The same abstraction as OpenAI's API, but the model runs inside your GCP project.
+**When Model Garden endpoints are appropriate:** When a specific open-weight model is required for compliance, data-residency, or output reproducibility reasons, and the workload frequency justifies the idle cost.
 
 ---
 
 ### Vertex AI Model Registry
-**What it is:** A versioned catalogue of trained model artifacts. Each registered model version stores a pointer to its GCS artifact location, the training job that produced it, and any associated metadata (hyperparameters, evaluation scores).
 
-**Why it matters here:** Without a registry, "which weights are in production?" is answered by checking a folder name. With the registry, every deployed model version has a lineage trail: you can see which training job produced it, what RAGAS scores it achieved, and compare it to previous versions.
+**Description:** A versioned catalog of trained model artifacts. Each registered version stores a reference to the GCS artifact path, the training job that produced it, and associated metadata (hyperparameters, evaluation scores, dataset version).
 
-**Mental model:** Like `git` for model weights. Each version is a commit; you can diff, roll back, and see the history.
+**Relevance:** Without a registry, identifying which weights are deployed requires inspecting directory names. The registry provides full lineage traceability: training job → evaluation scores → deployed version, with rollback to any prior version.
 
 ---
 
-### Cloud Run (inference serving)
-**What it is:** A serverless platform for running long-lived HTTP services in containers. Unlike Cloud Run Jobs (which run to completion), a Cloud Run *service* stays running and handles HTTP requests. It scales to zero when idle (so you pay nothing when no requests are coming in) and scales up automatically under load.
+### Cloud Run (Inference Serving)
 
-**Why it matters here:** Right now inference requires running `python src/run_model.py` on your machine. Cloud Run packages the model + scope classifier into a container and gives you an HTTPS endpoint that anyone (or any system) can call. It handles scaling, TLS, and zero-downtime deployments.
+**Description:** A serverless platform for long-lived HTTP services in containers. Unlike Cloud Run Jobs, a Cloud Run *service* handles incoming HTTP requests, scales to zero when idle (zero-cost at idle), and scales horizontally under load. GCP manages TLS termination and traffic routing.
 
-**Mental model:** Like deploying a Flask app to Heroku, but with auto-scaling, zero-cost idle, and deep GCP integration.
+**Relevance:** The current inference workflow requires `python src/run_model.py` running on the developer's machine. Packaging the model and scope classifier into a Cloud Run service exposes an HTTPS endpoint callable by any client, with automatic scaling and zero-downtime deployments.
 
 ---
 
 ### Vertex AI Pipelines
-**What it is:** A managed pipeline orchestration platform based on the Kubeflow Pipelines (KFP) SDK. You define your ML workflow as a Python DAG (directed acyclic graph) — each node is a containerised step, edges define dependencies, and the platform handles scheduling, retries, parallelism, and artifact lineage.
 
-**Why it matters here:** Right now the workflow is `make train → make eval-ragas → make export-merged` — three manual commands. Vertex AI Pipelines automates this entire sequence, adds a quality gate (skip deployment if RAGAS scores are below threshold), and records every run's inputs, outputs, and timing in a persistent UI.
+**Description:** A managed pipeline orchestration platform based on the Kubeflow Pipelines (KFP) SDK. ML workflows are defined as Python DAGs using the `@component` decorator; each node runs as an isolated containerized step. The platform manages scheduling, retries, parallelism, artifact lineage, and run history.
 
-**Mental model:** Like Airflow or GitHub Actions, but purpose-built for ML workflows and integrated with all other Vertex AI services.
+**Relevance:** The current workflow consists of three manual commands: `make train → make eval-ragas → make export-merged`. Vertex AI Pipelines automates this sequence, adds conditional branching on evaluation quality gates, and records per-run inputs, outputs, and execution timing in a persistent UI.
 
 ---
 
 ### Cloud Build
-**What it is:** A managed continuous integration (CI) service. You define a build pipeline in a `cloudbuild.yaml` file; Cloud Build triggers it on `git push`, runs the steps (lint, test, `docker build`, `docker push`), and reports pass/fail.
 
-**Why it matters here:** Without CI, "the training container" is whatever you last built locally. Cloud Build ensures every merge to `main` produces a freshly built, versioned container image tagged with the commit SHA — so training jobs are always reproducible.
+**Description:** A managed continuous integration service. Build pipelines are defined in `cloudbuild.yaml`; Cloud Build triggers them on `git push`, executes build steps (lint, test, `docker build`, `docker push`), and reports pass/fail status.
 
-**Mental model:** Like GitHub Actions, but the build runners have fast access to GCS and Artifact Registry within GCP's network.
+**Relevance:** Without CI, the training container image reflects whatever was last built locally. Cloud Build ensures every merge to `main` produces a versioned container image tagged with the commit SHA, providing reproducibility guarantees for all training jobs.
 
 ---
 
 ## GCP Service Map
 
-| Pipeline Layer | Current | GCP Service | Why this service? |
+| Pipeline Layer | Current Implementation | GCP Service | Rationale |
 |---|---|---|---|
-| Secret / API key storage | `.env` file | Secret Manager | Audit-logged, IAM-scoped; eliminates plaintext secrets in the repo |
-| Training data + configs | `data/`, `configs/` | Cloud Storage | Native `gs://` support in HF Trainer; versioned; accessible from any GCP VM |
-| Model artifact storage | `artifacts/` | Cloud Storage | Same bucket strategy; checkpoints survive VM preemption |
-| Synthetic data generation | Local async script | Cloud Run Jobs | Run 10 shards in parallel; pay per second; no idle cost |
-| Training compute | Laptop CPU/MPS | Vertex AI Custom Training | Any GPU type; spot pricing; no VM management |
-| Container image registry | Local Docker | Artifact Registry | Private; fast pulls within GCP; integrated with Cloud Build |
-| Experiment tracking | Local TensorBoard | Vertex AI TensorBoard | Persistent across runs; accessible to the whole team |
-| RAGAS LLM judge | Ollama localhost | Vertex AI Gemini API | Pay-per-token; no endpoint to manage; scales to zero; RAGAS supports it natively |
-| Metric history & quality gates | `ragas_results.json` | BigQuery | SQL queries across all runs; quality-gate thresholds as SQL WHERE clauses |
-| Pipeline orchestration | Manual Makefile | Vertex AI Pipelines | Automated DAG with conditional branching, retries, and lineage |
-| Model versioning | Local `artifacts/exports/` | Vertex AI Model Registry | Lineage from training job → evaluation scores → deployment |
-| Model serving | `python src/run_model.py` | Cloud Run | Serverless; scales to zero; HTTPS endpoint; zero-downtime deploys |
-| CI/CD | None | Cloud Build | Rebuilds container images on every `git push main` |
-| Event-driven triggers | None | Eventarc | GCS file write → automatic evaluation run; no manual trigger needed |
+| Secret / API key storage | `.env` file | Secret Manager | Audit-logged, IAM-scoped; eliminates plaintext secrets in the repository |
+| Training data + configs | `data/`, `configs/` | Cloud Storage | Native `gs://` support in HF Trainer; versioned; accessible from any GCP compute resource |
+| Model artifact storage | `artifacts/` | Cloud Storage | Checkpoints survive VM preemption; consistent path scheme across services |
+| Synthetic data generation | Local async script | Cloud Run Jobs | 10-way parallel sharding; per-second billing; no idle cost |
+| Training compute | Local CPU / MPS | Vertex AI Custom Training | Any GPU type; spot pricing; no VM lifecycle management |
+| Container image registry | Local Docker daemon | Artifact Registry | Private; low-latency pulls within GCP network; IAM-integrated |
+| Experiment tracking | Local TensorBoard | Vertex AI TensorBoard | Persistent across runs; team-accessible; no local process required |
+| RAGAS LLM judge | Ollama localhost | Vertex AI Gemini API | Pay-per-token; no endpoint management; scales to zero; native RAGAS support |
+| Metric history and quality gates | `ragas_results.json` | BigQuery | SQL-queryable cross-run history; quality-gate thresholds as SQL predicates |
+| Pipeline orchestration | Manual Makefile | Vertex AI Pipelines | Automated DAG with conditional branching, retries, and artifact lineage |
+| Model versioning | Local `artifacts/exports/` | Vertex AI Model Registry | Full training-to-deployment lineage; per-version rollback |
+| Model serving | `python src/run_model.py` | Cloud Run | Serverless; scales to zero; managed HTTPS; zero-downtime deployments |
+| CI/CD | None | Cloud Build | Rebuilds container images on every `git push main` with commit SHA tagging |
+| Event-driven triggers | None | Eventarc | GCS object finalize → automatic evaluation run; removes manual trigger dependency |
 
 ---
 
@@ -239,7 +226,7 @@ flowchart TB
 
 ---
 
-## Pipeline Flow (Automated)
+## Automated Pipeline Flow
 
 ```mermaid
 flowchart LR
@@ -257,11 +244,11 @@ flowchart LR
 
 ## Phased Roadmap
 
-The six phases are ordered so that each phase makes the next one possible. You can stop after any phase and still have a working, improved pipeline.
+Phases are sequenced so each phase establishes the prerequisites for the next. Any phase represents a stable, independently useful checkpoint.
 
-| Phase | Focus | Key Services | Effort | Priority |
+| Phase | Focus | Key Services | Estimated Effort | Priority |
 |---|---|---|---|---|
-| 1 | Storage + secrets baseline | GCS, Secret Manager | 2–4 h | **Start here** |
+| 1 | Storage and secrets baseline | GCS, Secret Manager | 2–4 h | Critical |
 | 2 | GPU training | Vertex AI Custom Training, Artifact Registry, TensorBoard | 1–2 d | High |
 | 3 | Scalable data generation | Cloud Run Jobs, BigQuery | 1–2 d | High |
 | 4 | Automated evaluation | Vertex Gemini API, BigQuery, Eventarc | 1 d | Medium |
@@ -270,122 +257,116 @@ The six phases are ordered so that each phase makes the next one possible. You c
 
 ---
 
-### Phase 1 — Storage & Secrets
+### Phase 1 — Storage and Secrets
 
-**Goal:** Replace fragile local paths and plaintext API keys with managed cloud equivalents. This phase has no new compute — it's purely about making data and credentials safe and portable.
+**Objective:** Replace local filesystem paths and plaintext API keys with managed cloud equivalents. This phase introduces no new compute resources; the scope is limited to data portability and credential security.
 
-**What you'll set up:**
-- **Secret Manager:** Replace every `os.getenv("ANTHROPIC_API_KEY")` call in `llm_client.py` with a Secret Manager fetch. Remove `.env` from the repo entirely. Any team member with the right IAM role can now run data generation without you sharing keys manually.
-- **Cloud Storage:** Create three buckets — `slm-training-data`, `slm-artifacts`, `slm-logs` — and update `output_dir` in both training YAMLs to use `gs://` paths. HuggingFace Trainer writes checkpoints directly to GCS from this point.
+**Implementation:**
 
-**Files to change:** `llm_client.py`, `configs/default_training.yaml`, `configs/mps_training.yaml`, `src/generate_dataset.py`, `src/evaluate_ragas.py`, `requirements.txt` (add `gcsfs`, `google-cloud-secret-manager`).
+- **Secret Manager:** Replace all `os.getenv("ANTHROPIC_API_KEY")` calls in `llm_client.py` with Secret Manager fetch calls. Remove `.env` from the repository. Team members with the appropriate IAM role can run data generation without manual credential sharing.
+- **Cloud Storage:** Provision three buckets — `slm-training-data`, `slm-artifacts`, `slm-logs` — and update `output_dir` in both training configuration YAMLs to `gs://` paths. The HuggingFace `Trainer` writes checkpoints directly to GCS from this point forward.
 
-**What you'll learn:** How IAM service accounts work, how to create and configure GCS buckets, and how to replace environment-variable-based secrets with a proper secrets vault.
+**Files affected:** `llm_client.py`, `configs/default_training.yaml`, `configs/mps_training.yaml`, `src/generate_dataset.py`, `src/evaluate_ragas.py`, `requirements.txt` (add `gcsfs`, `google-cloud-secret-manager`).
 
 ---
 
 ### Phase 2 — GPU Training
 
-**Goal:** Move `make train` off your laptop and onto a cloud GPU. After this phase, training is a job you *submit* rather than something that ties up your machine.
+**Objective:** Migrate `make train` from the local machine to a cloud GPU instance. After this phase, training is submitted as a job rather than executed on the developer's workstation.
 
-**What you'll set up:**
-- **Artifact Registry:** Create a Docker image containing your training dependencies (`pytorch/pytorch` base + HuggingFace stack). Push it to Artifact Registry tagged with the current git SHA.
-- **Vertex AI Custom Training:** Write a job definition that references the container image and a `TRAINING_CONFIG_URI` environment variable pointing at your YAML in GCS. Submit the job; GCP provisions a GPU VM, runs your container, and shuts down when done.
-- **Vertex AI TensorBoard:** Point `logging_dir` in your training config at `gs://slm-logs/`. Vertex AI automatically links logs from each training job to the TensorBoard instance — no extra code needed.
+**Implementation:**
 
-**Spot VM note:** With `save_steps: 100` writing checkpoints to GCS, a preempted spot VM loses at most 100 steps of progress. The next job resumes from the latest checkpoint automatically.
+- **Artifact Registry:** Build a Docker image from a `pytorch/pytorch` base with the full HuggingFace training stack. Push to Artifact Registry tagged with the current git SHA.
+- **Vertex AI Custom Training:** Define a job specification referencing the container image and a `TRAINING_CONFIG_URI` environment variable pointing at the training YAML in GCS. On submission, GCP provisions the specified GPU instance, executes the container, and terminates on completion.
+- **Vertex AI TensorBoard:** Set `logging_dir` in the training configuration to `gs://slm-logs/`. Vertex AI automatically associates each training job's logs with the TensorBoard instance; no additional instrumentation is required.
 
-**Files to change:** `Dockerfile` (new), `src/train_slm.py` (add `TRAINING_CONFIG_URI` env var loading), `requirements.txt` (add `google-cloud-aiplatform`).
+**Spot VM checkpoint recovery:** With `save_steps: 100` writing checkpoints to GCS, a preempted spot VM loses at most 100 training steps. The subsequent job submission resumes from the latest available checkpoint automatically.
 
-**What you'll learn:** How to containerise a training workload, how Vertex AI Custom Training job submissions work, and how managed TensorBoard differs from the local version.
+**Files affected:** `Dockerfile` (new), `src/train_slm.py` (add `TRAINING_CONFIG_URI` environment variable resolution), `requirements.txt` (add `google-cloud-aiplatform`).
 
 ---
 
 ### Phase 3 — Scalable Data Generation
 
-**Goal:** Replace the single-process `generate_dataset.py` script with a parallelised, containerised job that can generate datasets 10x faster.
+**Objective:** Replace the single-process `generate_dataset.py` script with a parallelized, containerized job capable of generating datasets at 10x throughput.
 
-**What you'll set up:**
-- **Cloud Run Jobs:** Containerise the three-phase data pipeline (product sampling → QA generation → quality filtering). Configure the job to run 10 task replicas in parallel. Each task reads a shard index from an environment variable and writes its output to `gs://slm-training-data/filtered/shard-N.jsonl`.
-- **BigQuery:** After all shards complete, merge them into a `slm_datasets.training_examples` table. BigQuery deduplicates rows automatically and keeps a queryable history of every example across dataset versions.
+**Implementation:**
 
-**Files to change:** `src/data_gen/generate_dataset.py` (add `--shard-index` / `--total-shards` args; write output to GCS), `Dockerfile.datagen` (new).
+- **Cloud Run Jobs:** Containerize the three-phase data pipeline (product sampling → QA generation → quality filtering). Configure the job with 10 task replicas. Each task reads a shard index from an environment variable (`SHARD_INDEX`, `TOTAL_SHARDS`) and writes output to `gs://slm-training-data/filtered/shard-N.jsonl`.
+- **BigQuery:** After all shards complete, load and merge shard files into `slm_datasets.training_examples`. BigQuery deduplicates rows on insert and maintains a queryable history of all examples across dataset versions.
 
-**What you'll learn:** How sharded batch workloads work, why BigQuery is better than JSONL files for growing datasets, and how to parameterise containers via environment variables.
+**Files affected:** `src/data_gen/generate_dataset.py` (add `--shard-index` / `--total-shards` arguments; write output to GCS paths), `Dockerfile.datagen` (new).
 
 ---
 
 ### Phase 4 — Automated Evaluation
 
-**Goal:** Make evaluation happen automatically whenever new adapter weights land in GCS, using a managed LLM judge instead of local Ollama.
+**Objective:** Trigger evaluation automatically on adapter weight publication to GCS, using a managed LLM judge in place of the local Ollama dependency.
 
-**What you'll set up:**
-- **Vertex AI Gemini API (judge):** Replace the Ollama `base_url` in `evaluate_ragas.py` with a call to `gemini-2.0-flash` via RAGAS's `LangchainLLMWrapper`. No endpoint to deploy or keep warm — you pay per token only when evaluation runs. This is almost always cheaper for occasional evals than a dedicated Model Garden endpoint, which costs $1–3/hr at idle even when no jobs are running.
+**Implementation:**
 
-  > **When to reconsider Model Garden:** If you need a specific open-weight model for compliance or data-residency reasons, a dedicated endpoint makes sense — but size it down to Gemma 2B rather than 8B to control idle cost.
+- **Vertex AI Gemini API (judge):** Replace the Ollama `base_url` configuration in `evaluate_ragas.py` with a `gemini-2.0-flash` call via RAGAS's `LangchainLLMWrapper`. No endpoint to provision or maintain; billing is per token at evaluation time only.
 
-- **BigQuery:** Write RAGAS scores and perplexity delta into `slm_datasets.experiment_metrics` at the end of every evaluation run, keyed by `run_id`. This makes the quality gate in Phase 6 a simple SQL query.
-- **Eventarc:** Create a trigger on `gs://slm-artifacts/adapters/` for the `google.cloud.storage.object.v1.finalized` event. When the training job writes adapter weights, Eventarc automatically fires a Cloud Run container that runs evaluation — no `make eval-ragas` required.
+  > **Model Garden vs. Gemini API:** For infrequent evaluation runs, the Gemini API (pay-per-token, no idle cost) is strongly preferred over a dedicated Model Garden endpoint, which incurs approximately $1–3/hr of idle cost even when no evaluation is running. A dedicated open-weight endpoint is appropriate only when a specific model is required for compliance or data-residency reasons.
 
-  > **Note — stepping stone only:** This Eventarc trigger will be superseded in Phase 6. Once Vertex AI Pipelines is wiring the full DAG, evaluation is just the step that follows training — the external trigger becomes redundant (and could cause double evaluations if both fire). Keep the trigger active only until Phase 6 is deployed, then disable it.
+- **BigQuery:** Append RAGAS scores and perplexity delta to `slm_datasets.experiment_metrics` at the end of each evaluation run, keyed by `run_id`. This provides the data required for the quality gate in Phase 6.
+- **Eventarc:** Create a trigger on the `gs://slm-artifacts/adapters/` prefix for the `google.cloud.storage.object.v1.finalized` event. The trigger invokes a Cloud Run container that executes the evaluation pipeline, removing the `make eval-ragas` manual step.
 
-**Files to change:** `src/evaluate_ragas.py` (Vertex endpoint URL, BigQuery write), `src/compare_eval_loss.py` (BigQuery write), `requirements.txt` (add `google-cloud-bigquery`).
+  > **Phase 6 deprecation note:** This Eventarc trigger is a transitional mechanism. Once Vertex AI Pipelines orchestrates the full DAG in Phase 6, evaluation is an explicit downstream step of training — the external trigger becomes redundant and should be disabled to prevent duplicate evaluation runs.
 
-**What you'll learn:** How event-driven ML pipelines work, how to use a managed model endpoint as a drop-in replacement for a local one, and how to build a queryable metrics history.
+**Files affected:** `src/evaluate_ragas.py` (Vertex endpoint URL, BigQuery write), `src/compare_eval_loss.py` (BigQuery write), `requirements.txt` (add `google-cloud-bigquery`).
 
 ---
 
 ### Phase 5 — Model Serving
 
-**Goal:** Turn the exported model into an HTTPS API endpoint that anyone can call, with the scope classifier as a built-in gate.
+**Objective:** Expose the exported model as an authenticated HTTPS API endpoint with the scope classifier integrated as a request gate.
 
-**What you'll set up:**
-- **Vertex AI Model Registry:** After export, register the merged model with a version that links to the GCS artifact path, the training `run_id`, and the BigQuery metrics row. This creates a full lineage trail from raw data → training job → evaluation scores → deployed version.
-- **Cloud Run:** Write a FastAPI wrapper around `run_model.py` that accepts a POST request with a prompt, runs the scope classifier, calls the SLM, and returns the response. Package it with an `inference/Dockerfile`. Deploy to Cloud Run; GCP provides an HTTPS endpoint with TLS and auto-scaling.
+**Implementation:**
 
-**Serving options compared:**
+- **Vertex AI Model Registry:** After export, register the merged model with a version entry linking to the GCS artifact path, the training `run_id`, and the corresponding BigQuery metrics row. This establishes a traceable lineage from raw data through training, evaluation, and deployment.
+- **Cloud Run:** Implement a FastAPI wrapper around `run_model.py` that accepts a POST request containing a prompt, applies the scope classifier, invokes the SLM, and returns the response. Package with `inference/Dockerfile`. Cloud Run manages TLS, traffic routing, and horizontal scaling.
 
-| Option | Best for | Cold start (container + weights) | Cost at zero traffic |
+**Serving configuration trade-offs:**
+
+| Configuration | Optimal Use Case | Cold Start (container + weights) | Cost at Zero Traffic |
 |---|---|---|---|
-| Cloud Run CPU (min-instances=0) | Demo / bursty traffic | 30–90 s total¹ | $0 |
-| Cloud Run CPU (min-instances=1) | Low-latency demos | ~0 s | ~$15–25/mo |
+| Cloud Run CPU (`min-instances=0`) | Demo / bursty traffic | 30–90 s total¹ | $0 |
+| Cloud Run CPU (`min-instances=1`) | Low-latency demos | ~0 s | ~$15–25/mo |
 | Cloud Run GPU | Moderate traffic | 60–120 s total | $0 |
-| Vertex AI Online Prediction | Production A/B | 30–60 s | $0 |
-| GKE + vLLM | High throughput | None | $200+/mo |
+| Vertex AI Online Prediction | Production A/B testing | 30–60 s | $0 |
+| GKE + vLLM | High-throughput production | None | $200+/mo |
 
-¹ The 8–15 s estimate is container startup only. Loading TinyLlama-1.1B weights from GCS into CPU RAM adds 20–60 s on a cold instance depending on memory bandwidth. Total cold-start latency is closer to 30–90 s.
+¹ Container startup alone is 8–15 s. Loading TinyLlama-1.1B weights from GCS into CPU RAM adds 20–60 s depending on memory bandwidth, yielding 30–90 s total cold-start latency.
 
-**Recommendation — pick one, not both:**
-- **Demo / cost-sensitive:** `min-instances=0`. Accept the cold-start penalty; your first request after idle will be slow.
-- **Low-latency required:** `min-instances=1`. Eliminates cold starts entirely for ~$15–25/mo but breaks the "costs $0 at idle" property. Budget accordingly.
+**Configuration guidance:**
+- **Cost-sensitive / demo:** `min-instances=0`. First request after idle incurs full cold-start latency.
+- **Latency-sensitive:** `min-instances=1`. Eliminates cold starts at a fixed cost of ~$15–25/mo, removing the zero-idle-cost property.
 
-Loading weights at startup from GCS is the dominant latency source. If cold starts are unacceptable, `min-instances=1` is the right lever — not a faster machine type.
+Weight loading from GCS at startup is the dominant cold-start latency source. `min-instances=1` is the correct lever for eliminating cold starts; changing machine type does not materially improve this.
 
-**Files to change:** `inference/server.py` + `inference/Dockerfile` (new), `src/run_model.py` (accept `MODEL_URI` env var pointing at GCS artifact path).
-
-**What you'll learn:** How to build and deploy an LLM inference API, what model versioning looks like in practice, and how to gate model access with a scope classifier in a serverless context.
+**Files affected:** `inference/server.py` + `inference/Dockerfile` (new), `src/run_model.py` (add `MODEL_URI` environment variable for GCS artifact path resolution).
 
 ---
 
 ### Phase 6 — Full MLOps Orchestration
 
-**Goal:** Replace the manual "run Phase 1 then Phase 2 then …" workflow with a single automated pipeline that handles the entire lifecycle, including conditional branching on evaluation results.
+**Objective:** Replace the sequential manual phase execution with a single automated pipeline covering the complete ML lifecycle, including quality-gated conditional branching.
 
-**What you'll set up:**
-- **Vertex AI Pipelines (Kubeflow DSL):** Define the full workflow as a Python file where each function decorated with `@component` becomes a containerised pipeline step. The quality gate is a conditional edge: if `faithfulness < 0.75`, the pipeline stops and sends an alert; if it passes, the pipeline continues to export and deploy.
-- **Cloud Build:** Write a `cloudbuild.yaml` that triggers on every `git push main`. It rebuilds both the trainer and inference container images, tags them with the commit SHA, pushes them to Artifact Registry, and optionally kicks off a new pipeline run.
+**Implementation:**
 
-**What you'll learn:** How to express ML workflows as code (pipeline-as-code), how conditional branching works in MLOps DAGs, and how CI/CD connects code changes to automatic retraining.
+- **Vertex AI Pipelines (Kubeflow DSL):** Define the complete workflow as a Python module in which each function decorated with `@component` compiles to an isolated containerized pipeline step. The quality gate is implemented as a conditional edge: if `faithfulness < 0.75`, the pipeline terminates and emits an alert; if the gate passes, the pipeline proceeds to export and deployment.
+- **Cloud Build:** Define a `cloudbuild.yaml` that triggers on `git push main`. Steps rebuild the trainer and inference container images, tag them with the commit SHA, push to Artifact Registry, and optionally submit a new pipeline run.
 
 ---
 
-## Key Architectural Decisions
+## Architectural Decision Record
 
 | Decision | Rationale |
 |---|---|
-| GCS over local filesystem | HuggingFace Trainer + `gcsfs` support `gs://` natively — zero architectural change required |
-| Cloud Run Jobs over GKE | Data generation is a batch workload; no persistent cluster needed; managed retries are built in |
-| Vertex AI Custom Training over SageMaker/AzureML | Accepts any Docker image; no framework-specific wrapper or SDK required |
-| Cloud Run over Vertex AI Online Prediction for serving | TinyLlama-1.1B fits on CPU; scales to zero; simpler ops for low-traffic use cases |
-| BigQuery over JSON files for metrics | Enables cross-run regression detection and quality-gate queries with standard SQL |
-| Eventarc for eval trigger | Replaces manual `make eval-ragas`; evaluation runs automatically on every new checkpoint |
+| GCS over local filesystem | HuggingFace Trainer resolves `gs://` paths natively via `gcsfs`; no code changes required to redirect output |
+| Cloud Run Jobs over GKE | Data generation is a stateless batch workload; a persistent cluster adds unnecessary operational overhead |
+| Vertex AI Custom Training over SageMaker / AzureML | Accepts arbitrary Docker images without framework-specific wrappers or SDKs |
+| Cloud Run over Vertex AI Online Prediction for serving | TinyLlama-1.1B fits on CPU; Cloud Run scales to zero; operationally simpler for low-traffic deployments |
+| BigQuery over JSON files for metrics | Enables cross-run regression detection and quality-gate predicate evaluation via standard SQL |
+| Eventarc for evaluation trigger (Phases 1–5) | Decouples training job completion from evaluation invocation; superseded by Vertex AI Pipelines in Phase 6 |
